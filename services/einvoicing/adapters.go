@@ -111,7 +111,7 @@ func (CSVAdapter) Parse(body []byte) ([]*CanonicalInvoice, error) {
 		}
 		rate, _ := strconv.ParseInt(def(get(row, "vat_rate_bps"), "0"), 10, 64)
 		inv.Lines = append(inv.Lines, InvoiceLine{
-			Description: get(row, "line_description"),
+			Description:   get(row, "line_description"),
 			QuantityMilli: qty, UnitPriceKobo: price,
 			VatCategory: def(get(row, "vat_category"), "S"), VatRateBps: rate,
 		})
@@ -141,12 +141,12 @@ type SAPODataAdapter struct {
 func (SAPODataAdapter) Name() string { return "sap-odata" }
 
 type odataLine struct {
-	ItemCode        string  `json:"ItemCode"`
-	Description     string  `json:"ItemDescription"`
-	Quantity        float64 `json:"Quantity"`
-	UnitPriceMinor  float64 `json:"UnitPriceKobo"`
-	TaxCode         string  `json:"TaxCode"`
-	TaxPercent      float64 `json:"TaxPercent"`
+	ItemCode       string  `json:"ItemCode"`
+	Description    string  `json:"ItemDescription"`
+	Quantity       float64 `json:"Quantity"`
+	UnitPriceMinor float64 `json:"UnitPriceKobo"`
+	TaxCode        string  `json:"TaxCode"`
+	TaxPercent     float64 `json:"TaxPercent"`
 }
 
 type odataDoc struct {
@@ -195,11 +195,11 @@ func (a SAPODataAdapter) Parse(body []byte) ([]*CanonicalInvoice, error) {
 				cat = "E"
 			}
 			inv.Lines = append(inv.Lines, InvoiceLine{
-				ID: fmt.Sprintf("%d", i+1),
-				Description: def(l.Description, l.ItemCode),
+				ID:            fmt.Sprintf("%d", i+1),
+				Description:   def(l.Description, l.ItemCode),
 				QuantityMilli: int64(l.Quantity * 1000),
 				UnitPriceKobo: int64(l.UnitPriceMinor),
-				VatCategory: cat, VatRateBps: rate,
+				VatCategory:   cat, VatRateBps: rate,
 			})
 		}
 		out = append(out, inv)
