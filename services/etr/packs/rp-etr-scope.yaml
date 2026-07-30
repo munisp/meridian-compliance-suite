@@ -1,0 +1,22 @@
+id: rp-etr-scope
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "NTA 2025 Part XI: minimum effective tax for MNE groups (EUR 750m consolidated revenue)"
+  as_gazetted: null
+  source_citation: "Nigeria Tax Act 2025 (Minimum Effective Tax); OECD GloBE Model Rules Art. 1.1"
+rules:
+  - id: etr.scope.revenue_threshold
+    when: {}
+    then:
+      threshold_ngn_kobo: 12000000000000000
+      threshold_note: "EUR 750m consolidated revenue, NGN kobo equivalent (dev rate)"
+      narrate: "MNE group in scope when consolidated revenue >= EUR 750m in 2 of 4 prior years"
+  - id: etr.scope.exclusions
+    when: {}
+    then:
+      excluded_entity_types: [governmental, international_org, non_profit, pension_fund, investment_fund_upe]
+      narrate: "GloBE Art. 1.5 excluded entities"

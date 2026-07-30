@@ -1,0 +1,20 @@
+id: rp-etr-cfc
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "NTA 2025 CFC rules interaction with minimum ETR (controlled foreign company pool)"
+  as_gazetted: null
+  source_citation: "Nigeria Tax Act 2025 (CFC provisions); GloBE Art. 4.3.2(c) CFC tax pushdown"
+rules:
+  - id: etr.cfc.pushdown
+    when: {}
+    then: { method: proportional_ownership, narrate: "CFC-level covered taxes allocated down to CFC entities by ownership %" }
+  - id: etr.cfc.pool
+    when: {}
+    then: { blend: jurisdictional, narrate: "CFC entities blend into their jurisdiction pools (no global blending)" }
+  - id: etr.cfc.blend_limit
+    when: {}
+    then: { cap_bps: 1500, narrate: "CFC pushdown capped at amount needed to reach 15% ETR" }

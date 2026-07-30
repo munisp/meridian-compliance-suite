@@ -1,0 +1,46 @@
+import axios, { AxiosInstance } from 'axios'
+
+// Env-configurable API base URLs (SPEC: planes consume core contracts).
+const env = (k: string, def: string) =>
+  (import.meta as any).env?.[k] || def
+
+export const BASES = {
+  einvoicing: env('VITE_EINVOICING_URL', 'http://localhost:8101'),
+  wht: env('VITE_WHT_URL', 'http://localhost:8107'),
+  etr: env('VITE_ETR_URL', 'http://localhost:8109'),
+  vasp: env('VITE_VASP_CARF_URL', 'http://localhost:8110'),
+  pos: env('VITE_POS_VAT_URL', 'http://localhost:8106'),
+  cases: env('VITE_CASE_MGMT_URL', 'http://localhost:8113'),
+} as const
+
+export type ServiceKey = keyof typeof BASES
+
+const clients: Partial<Record<ServiceKey, AxiosInstance>> = {}
+
+export function api(key: ServiceKey): AxiosInstance {
+  if (!clients[key]) {
+    clients[key] = axios.create({ baseURL: BASES[key], timeout: 15000 })
+    clients[key]!.interceptors.request.use((cfg) => {
+      const token = localStorage.getItem('meridian.token')
+      const role = localStorage.getItem('meridian.role') || 'operator'
+      if (token) cfg.headers.Authorization = `Bearer ${token}`
+      cfg.headers['X-Dev-Role'] = role // dev-mode fallback per SPEC §1.3
+      return cfg
+    })
+    clients[key]!.interceptors.response.use(
+      (r) => r,
+      (err) => {
+        const p = err.response?.data
+        err.friendlyMessage = p?.detail || p?.title || err.message
+        return Promise.reject(err)
+      },
+    )
+  }
+  return clients[key]!
+}
+
+export const kobo = (k: number | undefined | null) =>
+  k == null ? '—' : `₦${(k / 100).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
+
+export const bps = (b: number | undefined | null) =>
+  b == null ? '—' : `${(b / 100).toFixed(2)}%`

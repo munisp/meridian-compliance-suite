@@ -1,0 +1,24 @@
+id: rp-gir-schema
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "OECD GloBE Information Return (GIR) XML schema v1.0 (July 2023 consultation)"
+  as_gazetted: null
+  source_citation: "OECD GIR XML Schema; NRS filing-pack specification"
+rules:
+  - id: gir.required_sections
+    when: {}
+    then:
+      sections: [mne_group, filing_constituent_entity, constituent_entities, jurisdiction_etr, topup_allocation, sbie_detail]
+      narrate: "Mandatory GIR sections"
+  - id: gir.message_spec
+    when: {}
+    then: { message_type: GIR, transmitting_country: NG, narrate: "GIR message spec" }
+  - id: filingpack.contents
+    when: {}
+    then:
+      contents: [computation, step_trace, entity_roster, pack_versions, digest]
+      narrate: "Meridian filing-pack JSON contents"
