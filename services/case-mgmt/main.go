@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/munisp/meridian-compliance-suite/packages/authx"
+	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 
 type Config struct {
@@ -26,12 +30,13 @@ func env(k, def string) string {
 }
 
 type Service struct {
-	cfg     Config
-	store   *Store
-	rel     *RelationChecker
-	worm    WORMClient
-	notify  Notifier
-	stopCh  chan struct{}
+	cfg    Config
+	store  *Store
+	rel    *RelationChecker
+	worm   WORMClient
+	notify Notifier
+	stopCh chan struct{}
+	kc     *authx.KeycloakVerifier // non-nil when AUTH_MODE=keycloak (H2)
 }
 
 func main() {
@@ -61,8 +66,32 @@ func main() {
 	}
 	svc := &Service{
 		cfg: cfg, store: NewStore(cfg.DataDir),
-		rel: NewRelationChecker(cfg.DataDir + "/relations.json"),
+		rel:  NewRelationChecker(cfg.DataDir + "/relations.json"),
 		worm: worm, notify: notify, stopCh: make(chan struct{}),
+	}
+	// H2: AUTH_MODE=keycloak selects RS256/JWKS verification.
+	if cfg.AuthMode == "keycloak" {
+		if v := authx.KeycloakVerifierFromEnv(); v != nil {
+			svc.kc = v
+			log.Printf("profile=prod component=auth (keycloak issuer=%s)", v.Issuer)
+		} else {
+			log.Printf("profile=dev component=auth (AUTH_MODE=keycloak but KEYCLOAK_ISSUER unset)")
+			cfg.AuthMode = "dev"
+			svc.cfg = cfg
+		}
+	} else {
+		log.Printf("profile=dev component=auth")
+	}
+	// H1/H3: DATABASE_URL selects the Postgres durable mirror.
+	ctx := context.Background()
+	if pool, err := prodx.PGFromEnv(ctx); err != nil {
+		log.Printf("postgres unavailable, staying on dev store: %v", err)
+	} else if pool != nil {
+		if docs, err := prodx.NewDocStore(ctx, pool, "case_mgmt"); err != nil {
+			log.Printf("postgres docstore: %v (staying on dev store)", err)
+		} else {
+			svc.store.AttachPG(ctx, docs)
+		}
 	}
 	go svc.deadlineWatch()
 
@@ -118,7 +147,21 @@ func (s *Service) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := r.Header.Get("Authorization")
 		if strings.HasPrefix(h, "Bearer ") {
-			claims, err := verifyHS256(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret)
+			tok := strings.TrimPrefix(h, "Bearer ")
+			if s.kc != nil {
+				c, err := s.kc.Verify(tok)
+				if err != nil {
+					writeProblem(w, 401, "unauthorized", err.Error())
+					return
+				}
+				r.Header.Set("X-Subject", "user:"+c.Sub)
+				if len(c.Roles) > 0 {
+					r.Header.Set("X-Role", c.Roles[0])
+				}
+				next(w, r)
+				return
+			}
+			claims, err := verifyHS256(tok, s.cfg.JWTSecret)
 			if err != nil {
 				writeProblem(w, 401, "unauthorized", err.Error())
 				return

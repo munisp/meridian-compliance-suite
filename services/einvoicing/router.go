@@ -14,9 +14,9 @@ import (
 
 // APP is an access-point provider: a named MBSClient plus routing metadata.
 type APP struct {
-	ID     string     `json:"id"`
-	Client MBSClient  `json:"-"`
-	Kind   string     `json:"kind"` // simulator|http
+	ID     string    `json:"id"`
+	Client MBSClient `json:"-"`
+	Kind   string    `json:"kind"` // simulator|http
 }
 
 // APPRouter resolves tenant → APP and fans out submissions.

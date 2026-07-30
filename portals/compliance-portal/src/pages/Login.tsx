@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useAuth } from '../auth'
+import { useAuth, OIDC_ENABLED } from '../auth'
 
 export default function Login() {
   const { login } = useAuth()
@@ -23,8 +23,22 @@ export default function Login() {
       <div className="card w-full max-w-sm p-8">
         <div className="mb-6">
           <div className="text-2xl font-semibold tracking-tight text-sand-900">Meridian</div>
-          <div className="text-sm text-sand-500 mt-1">Compliance Portal · dev sign-in</div>
+          <div className="text-sm text-sand-500 mt-1">
+            Compliance Portal · {OIDC_ENABLED ? 'Keycloak SSO' : 'dev sign-in'}
+          </div>
         </div>
+        {OIDC_ENABLED ? (
+          <div className="space-y-4">
+            <button className="btn w-full justify-center" disabled={busy}
+              onClick={async () => { setBusy(true); try { await login('', '') } finally { setBusy(false) } }}>
+              {busy ? 'Redirecting…' : 'Sign in with Keycloak'}
+            </button>
+            <p className="text-xs text-sand-400 mt-5">
+              Prod mode (VITE_AUTH_MODE=keycloak): authorization code + PKCE; tokens
+              are kept in memory and silently renewed.
+            </p>
+          </div>
+        ) : (
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="label">User</label>
@@ -43,10 +57,13 @@ export default function Login() {
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+        )}
+        {!OIDC_ENABLED && (
         <p className="text-xs text-sand-400 mt-5">
           Dev mode: a short-lived HS256 JWT is minted locally (MERIDIAN_DEV_JWT_SECRET);
           services also accept the X-Dev-Role header when AUTH_MODE=dev.
         </p>
+        )}
       </div>
     </div>
   )

@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import { OIDC_ENABLED, currentAccessToken } from './oidc'
 
 // Env-configurable API base URLs (SPEC: planes consume core contracts).
 const env = (k: string, def: string) =>
@@ -20,7 +21,13 @@ const clients: Partial<Record<ServiceKey, AxiosInstance>> = {}
 export function api(key: ServiceKey): AxiosInstance {
   if (!clients[key]) {
     clients[key] = axios.create({ baseURL: BASES[key], timeout: 15000 })
-    clients[key]!.interceptors.request.use((cfg) => {
+    clients[key]!.interceptors.request.use(async (cfg) => {
+      if (OIDC_ENABLED) {
+        // Prod: Bearer token from the in-memory OIDC session (silent renew).
+        const token = await currentAccessToken()
+        if (token) cfg.headers.Authorization = `Bearer ${token}`
+        return cfg
+      }
       const token = localStorage.getItem('meridian.token')
       const role = localStorage.getItem('meridian.role') || 'operator'
       if (token) cfg.headers.Authorization = `Bearer ${token}`

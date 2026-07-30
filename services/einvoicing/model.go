@@ -26,14 +26,14 @@ type Party struct {
 // InvoiceLine: money is integer kobo ONLY (SPEC §1.3). Quantity in milli-units
 // (1000 = 1 unit) so fractional quantities stay integral.
 type InvoiceLine struct {
-	ID             string `json:"id"`
-	Description    string `json:"description"`
-	QuantityMilli  int64  `json:"quantity_milli"`
-	UnitPriceKobo  int64  `json:"unit_price_kobo"`
-	LineTotalKobo  int64  `json:"line_total_kobo"` // = QuantityMilli*UnitPriceKobo/1000
-	VatCategory    string `json:"vat_category"`    // S=standard 7.5%, Z=zero, E=exempt
-	VatRateBps     int64  `json:"vat_rate_bps"`    // 750 = 7.5%
-	VatAmountKobo  int64  `json:"vat_amount_kobo"`
+	ID            string `json:"id"`
+	Description   string `json:"description"`
+	QuantityMilli int64  `json:"quantity_milli"`
+	UnitPriceKobo int64  `json:"unit_price_kobo"`
+	LineTotalKobo int64  `json:"line_total_kobo"` // = QuantityMilli*UnitPriceKobo/1000
+	VatCategory   string `json:"vat_category"`    // S=standard 7.5%, Z=zero, E=exempt
+	VatRateBps    int64  `json:"vat_rate_bps"`    // 750 = 7.5%
+	VatAmountKobo int64  `json:"vat_amount_kobo"`
 }
 
 // CryptoStamp is the MBS cryptographic stamp returned with the IRN.
@@ -41,37 +41,37 @@ type CryptoStamp struct {
 	Algorithm string `json:"algorithm"` // ed25519
 	KeyID     string `json:"key_id"`
 	IRN       string `json:"irn"`
-	Payload   string `json:"payload"`  // canonical string that was signed
+	Payload   string `json:"payload"`   // canonical string that was signed
 	Signature string `json:"signature"` // hex
 	StampedAt string `json:"stamped_at"`
 }
 
 // CanonicalInvoice is the ERP-independent invoice model.
 type CanonicalInvoice struct {
-	ID             string        `json:"id"`
-	TenantID       string        `json:"tenant_id"`
-	InvoiceNumber  string        `json:"invoice_number"`
-	InvoiceType    string        `json:"invoice_type"` // B2B|B2C|B2G
-	IssueDate      string        `json:"issue_date"`   // YYYY-MM-DD
-	DueDate        string        `json:"due_date,omitempty"`
-	Currency       string        `json:"currency"`
-	Supplier       Party         `json:"supplier"`
-	Customer       Party         `json:"customer"`
-	Lines          []InvoiceLine `json:"lines"`
-	TaxExclusiveKobo int64       `json:"tax_exclusive_kobo"`
-	TaxKobo        int64         `json:"tax_kobo"`
-	PayableKobo    int64         `json:"payable_kobo"`
-	Status         string        `json:"status"` // received|validated|precleared|reported|failed
-	IRN            string        `json:"irn,omitempty"`
-	Stamp          *CryptoStamp  `json:"crypto_stamp,omitempty"`
-	CSIDSignature  string        `json:"csid_signature,omitempty"` // supplier-side ed25519 sig
-	CSIDKeyID      string        `json:"csid_key_id,omitempty"`
-	IdempotencyKey string        `json:"idempotency_key,omitempty"`
-	SourceAdapter  string        `json:"source_adapter,omitempty"`
-	UBLXML         string        `json:"ubl_xml,omitempty"`
-	Validation     []Violation   `json:"validation,omitempty"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
+	ID               string        `json:"id"`
+	TenantID         string        `json:"tenant_id"`
+	InvoiceNumber    string        `json:"invoice_number"`
+	InvoiceType      string        `json:"invoice_type"` // B2B|B2C|B2G
+	IssueDate        string        `json:"issue_date"`   // YYYY-MM-DD
+	DueDate          string        `json:"due_date,omitempty"`
+	Currency         string        `json:"currency"`
+	Supplier         Party         `json:"supplier"`
+	Customer         Party         `json:"customer"`
+	Lines            []InvoiceLine `json:"lines"`
+	TaxExclusiveKobo int64         `json:"tax_exclusive_kobo"`
+	TaxKobo          int64         `json:"tax_kobo"`
+	PayableKobo      int64         `json:"payable_kobo"`
+	Status           string        `json:"status"` // received|validated|precleared|reported|failed
+	IRN              string        `json:"irn,omitempty"`
+	Stamp            *CryptoStamp  `json:"crypto_stamp,omitempty"`
+	CSIDSignature    string        `json:"csid_signature,omitempty"` // supplier-side ed25519 sig
+	CSIDKeyID        string        `json:"csid_key_id,omitempty"`
+	IdempotencyKey   string        `json:"idempotency_key,omitempty"`
+	SourceAdapter    string        `json:"source_adapter,omitempty"`
+	UBLXML           string        `json:"ubl_xml,omitempty"`
+	Validation       []Violation   `json:"validation,omitempty"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
 // Violation is one validation finding from rp-ubl-bis / rp-mbs-business-rules.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,18 +10,42 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 
 // InvoiceStore is the durable canonical store (dev: JSONL file + in-memory
 // index; the Postgres outbox pattern of SPEC §1.1 is represented by the
 // file outbox in replay.go). Append-only log, last write wins by id.
 type InvoiceStore struct {
-	path       string
-	mu         sync.RWMutex
-	byID       map[string]*CanonicalInvoice
-	byIdemKey  map[string]string // idempotency key -> invoice id
-	bySuppNum  map[string]string // supplierTIN|invoiceNumber -> id
-	order      []string
+	path      string
+	mu        sync.RWMutex
+	byID      map[string]*CanonicalInvoice
+	byIdemKey map[string]string // idempotency key -> invoice id
+	bySuppNum map[string]string // supplierTIN|invoiceNumber -> id
+	order     []string
+	docs      *prodx.DocStore // non-nil when DATABASE_URL set (prod)
+}
+
+// SetPG attaches the Postgres document store (H1: DATABASE_URL). When set,
+// Postgres is the durable write path and the JSONL file becomes a local
+// debug mirror; startup loads from Postgres.
+func (s *InvoiceStore) SetPG(ctx context.Context, docs *prodx.DocStore) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.docs = docs
+	docsList, err := docs.List(ctx, "invoices")
+	if err != nil {
+		return err
+	}
+	for _, raw := range docsList {
+		var inv CanonicalInvoice
+		if err := json.Unmarshal(raw, &inv); err != nil {
+			return fmt.Errorf("pg store corrupt: %w", err)
+		}
+		s.index(&inv)
+	}
+	return nil
 }
 
 func NewInvoiceStore(path string) (*InvoiceStore, error) {
@@ -104,6 +129,11 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 	}
 	if err := f.Sync(); err != nil {
 		return "", err
+	}
+	if s.docs != nil {
+		if err := s.docs.Put(context.Background(), "invoices", inv.ID, line); err != nil {
+			return "", fmt.Errorf("pg persist: %w", err)
+		}
 	}
 	s.index(inv)
 	return "", nil

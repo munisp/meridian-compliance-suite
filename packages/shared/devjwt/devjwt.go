@@ -102,34 +102,11 @@ func Problem(w http.ResponseWriter, status int, title, detail string) {
 	})
 }
 
-// Middleware enforces Bearer JWT, or X-Dev-Role when AUTH_MODE=dev.
+// Middleware enforces Bearer JWT per AUTH_MODE (H1/H2): keycloak mode uses
+// RS256/JWKS (see keycloak.go); dev mode (default) accepts HS256 tokens or
+// the X-Dev-Role header.
 func Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			c, err := Verify(Secret(), strings.TrimPrefix(auth, "Bearer "))
-			if err != nil {
-				Problem(w, http.StatusUnauthorized, "unauthorized", err.Error())
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(withClaims(r, c)))
-			return
-		}
-		if os.Getenv("AUTH_MODE") == "dev" || os.Getenv("AUTH_MODE") == "" {
-			role := r.Header.Get("X-Dev-Role")
-			switch role {
-			case "admin", "operator", "auditor":
-				c := Claims{Sub: "dev-" + role, Roles: []string{role}, TenantID: r.Header.Get("X-Tenant-ID")}
-				next.ServeHTTP(w, r.WithContext(withClaims(r, c)))
-				return
-			}
-		}
-		Problem(w, http.StatusUnauthorized, "unauthorized", "provide Bearer JWT or X-Dev-Role (dev mode)")
-	})
+	return MiddlewareEnv(next)
 }
 
 func withClaims(r *http.Request, c Claims) context.Context {

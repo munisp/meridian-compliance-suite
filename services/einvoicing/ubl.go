@@ -46,9 +46,9 @@ type ublPartyTaxScheme struct {
 }
 
 type ublParty struct {
-	PartyName    ublPartyName      `xml:"cac:PartyName"`
-	Address      ublAddress        `xml:"cac:PostalAddress"`
-	PartyTax     *ublPartyTaxScheme `xml:"cac:PartyTaxScheme,omitempty"`
+	PartyName ublPartyName       `xml:"cac:PartyName"`
+	Address   ublAddress         `xml:"cac:PostalAddress"`
+	PartyTax  *ublPartyTaxScheme `xml:"cac:PartyTaxScheme,omitempty"`
 }
 
 type ublSupplierParty struct {
@@ -60,9 +60,9 @@ type ublCustomerParty struct {
 }
 
 type ublTaxSubtotal struct {
-	TaxableAmount ublAmount    `xml:"cbc:TaxableAmount"`
-	TaxAmount     ublAmount    `xml:"cbc:TaxAmount"`
-	Category      ublTaxCat    `xml:"cac:TaxCategory"`
+	TaxableAmount ublAmount `xml:"cbc:TaxableAmount"`
+	TaxAmount     ublAmount `xml:"cbc:TaxAmount"`
+	Category      ublTaxCat `xml:"cac:TaxCategory"`
 }
 
 type ublTaxCat struct {
@@ -72,7 +72,7 @@ type ublTaxCat struct {
 }
 
 type ublTaxTotal struct {
-	TaxAmount ublAmount       `xml:"cbc:TaxAmount"`
+	TaxAmount ublAmount        `xml:"cbc:TaxAmount"`
 	Subtotals []ublTaxSubtotal `xml:"cac:TaxSubtotal"`
 }
 
@@ -102,12 +102,12 @@ type ublQuantity struct {
 }
 
 type ublInvoiceLine struct {
-	ID              string          `xml:"cbc:ID"`
-	Quantity        ublQuantity     `xml:"cbc:InvoicedQuantity"`
-	LineExtension   ublAmount       `xml:"cbc:LineExtensionAmount"`
-	TaxTotal        ublLineTaxTotal `xml:"cac:TaxTotal"`
-	Item            ublItem         `xml:"cac:Item"`
-	Price           ublPrice        `xml:"cac:Price"`
+	ID            string          `xml:"cbc:ID"`
+	Quantity      ublQuantity     `xml:"cbc:InvoicedQuantity"`
+	LineExtension ublAmount       `xml:"cbc:LineExtensionAmount"`
+	TaxTotal      ublLineTaxTotal `xml:"cac:TaxTotal"`
+	Item          ublItem         `xml:"cac:Item"`
+	Price         ublPrice        `xml:"cac:Price"`
 }
 
 // UBLInvoice is the root document.

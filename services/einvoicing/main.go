@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -12,10 +13,26 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/devjwt"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/envelope"
 )
+
+// kafkaBus adapts the franz-go producer (KAFKA_BROKERS, H1/H3) to the
+// envelope.Publisher interface used by the outbox relay.
+type kafkaBus struct{ prod *prodx.Producer }
+
+func (b *kafkaBus) Publish(topic string, env envelope.Envelope) error {
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return b.prod.Publish(ctx, topic, []byte(env.ID), raw)
+}
 
 const serviceName = "einvoicing"
 const serviceVersion = "1.0.0"
@@ -57,10 +74,41 @@ func main() {
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
+	// H1: DATABASE_URL selects the Postgres durable store (dev: JSONL file).
+	ctx := context.Background()
+	if pool, err := prodx.PGFromEnv(ctx); err != nil {
+		log.Printf("postgres unavailable, staying on dev store: %v", err)
+	} else if pool != nil {
+		docs, err := prodx.NewDocStore(ctx, pool, "einvoicing")
+		if err != nil {
+			log.Printf("postgres docstore: %v (staying on dev store)", err)
+		} else if err := store.SetPG(ctx, docs); err != nil {
+			log.Printf("postgres load: %v (staying on dev store)", err)
+		}
+	}
 	outbox, err := envelope.NewOutbox(filepath.Join(dir, "outbox.jsonl"))
 	if err != nil {
 		log.Fatalf("outbox: %v", err)
 	}
+	// H1/H3: KAFKA_BROKERS selects the real (franz-go) producer behind the
+	// outbox relay; dev keeps the in-process bus.
+	var bus envelope.Publisher = envelope.NewInprocBus()
+	if prod, err := prodx.ProducerFromEnv(); err != nil {
+		log.Printf("kafka unavailable, staying on inproc bus: %v", err)
+	} else if prod != nil {
+		bus = &kafkaBus{prod: prod}
+		defer prod.Close()
+	}
+	relay := &envelope.Relay{Box: outbox, Bus: bus}
+	go func() {
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		for range tick.C {
+			if _, err := relay.Drain(); err != nil {
+				log.Printf("outbox relay: %v", err)
+			}
+		}
+	}()
 	signer, err := LoadCSID(dir)
 	if err != nil {
 		log.Fatalf("csid: %v", err)

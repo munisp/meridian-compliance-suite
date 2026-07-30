@@ -159,3 +159,56 @@ pip install -r services/rev360/requirements.txt -r services/wht/requirements.txt
 `services/case-mgmt` (T13p) and `portals/compliance-portal` are built by the
 part-B agent on branch `build/compliance-b`. This README covers them only
 pointers-wise; see their own docs.
+
+---
+
+## Production profile (HARDENING.md H1/H2/H3)
+
+Every integration is env-selected; with no prod vars set, all services run in
+dev mode with zero external dependencies. Startup never fails because a prod
+var is missing; each service logs `profile=dev|prod component=<name>`.
+
+| Var | Services | Purpose | Dev fallback |
+|---|---|---|---|
+| `AUTH_MODE` | all | `dev` (HS256 + `X-Dev-Role`) or `keycloak` (RS256/JWKS) | dev |
+| `KEYCLOAK_ISSUER` / `KEYCLOAK_AUDIENCE` / `KEYCLOAK_JWKS_URL` | all | realm issuer, expected `aud`, JWKS URL (default `{issuer}/protocol/openid-connect/certs`) | unset → dev auth |
+| `MERIDIAN_DEV_JWT_SECRET` | all | dev HS256 secret | `meridian-dev-secret…` |
+| `DATABASE_URL` | einvoicing, case-mgmt, pos-vat, vasp-carf, etr | Postgres DSN (pgx/v5 / psycopg) | JSONL append-log / SQLite |
+| `KAFKA_BROKERS` | einvoicing, pos-vat | Redpanda brokers (franz-go producer) behind the outbox/bus | inproc bus + file outbox |
+| `DATA_DIR` / `PORT` | all | dev data dir / listen port | temp dirs / 81xx |
+
+### Keycloak auth (H2)
+
+`packages/authx` (Go) verifies RS256 tokens against the realm JWKS with a
+5-minute cache and refresh-on-unknown-kid, validates `iss`/`exp`/`aud`, and
+maps `realm_access.roles` + `resource_access[aud].roles` into the flat `roles`
+claim. `packages/shared/devjwt.Middleware` now selects dev vs keycloak purely
+via `AUTH_MODE`. The Python etr service mirrors this with PyJWT[crypto] +
+PyJWKClient. The portal (`portals/compliance-portal`) uses oidc-client-ts
+authorization-code+PKCE when `VITE_AUTH_MODE=keycloak` (token in memory,
+silent renew); the dev-token login stays the default.
+
+### Postgres stores (H3)
+
+Go services share `packages/prodx`: pgx/v5 pools, a JSONB document store
+(`<svc>_docs`, `CREATE TABLE IF NOT EXISTS`, UPSERT = last-write-wins, same
+doc shape as the dev append-logs) and an outbox mirror. Python etr uses
+psycopg[binary] with identical table schemas (see `services/etr/app/store.py`).
+
+### Kafka (H3)
+
+`KAFKA_BROKERS` selects a franz-go producer; einvoicing relays the durable
+outbox (`envelope.Relay`) to the same nrs.* topics, pos-vat publishes on the
+existing bus interface. Topic names and the SPEC §1.1 envelope are unchanged.
+
+### Prod run example
+
+```bash
+export AUTH_MODE=keycloak KEYCLOAK_ISSUER=https://keycloak:8443/realms/meridian \
+       KEYCLOAK_AUDIENCE=meridian-services \
+       DATABASE_URL=postgres://meridian:secret@postgres:5432/compliance \
+       KAFKA_BROKERS=redpanda:9092
+go run ./services/einvoicing        # or case-mgmt / pos-vat / vasp-carf dirs
+```
+
+CI: `.github/workflows/ci.yml` (copy at `ci/workflows/ci.yml`, see `ci/README.md`).
