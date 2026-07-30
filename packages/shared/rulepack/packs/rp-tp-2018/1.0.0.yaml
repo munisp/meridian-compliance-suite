@@ -1,0 +1,44 @@
+id: rp-tp-2018
+version: 1.0.0
+effective_from: 2018-08-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "Income Tax (Transfer Pricing) Regulations 2018 — CbCR, master/local file, interest deductibility"
+  as_gazetted: "Federal Republic of Nigeria Official Gazette No. 113, Vol. 105, 2018"
+  source_citation: "Income Tax (Transfer Pricing) Regulations 2018"
+signed: { algorithm: ed25519, key_id: governance-board-2026, signature: "DEV-UNSIGNED" }
+rules:
+  # --- CbCR obligation thresholds (Reg 9 / OECD Action 13) ---
+  - id: tp.cbcr.threshold
+    when: { group_revenue_kobo__gte: 16000000000000 }
+    then: { cbcr_required: true, narrate: "MNE group revenue >= N160bn (approx EUR 750m): CbC report required (Reg 9)" }
+  - id: tp.cbcr.below
+    when: { group_revenue_kobo__lt: 16000000000000, group_revenue_kobo__gte: 0 }
+    then: { cbcr_required: false, narrate: "Below CbCR threshold" }
+  # --- Master/local file obligations ---
+  - id: tp.masterfile.threshold
+    when: { controlled_transactions_kobo__gte: 30000000000 }
+    then: { master_file_required: true, local_file_required: true, narrate: "Controlled transactions >= N300m: master and local file required (Reg 8)" }
+  - id: tp.localfile.only
+    when: { controlled_transactions_kobo__gte: 0, controlled_transactions_kobo__lt: 30000000000 }
+    then: { master_file_required: false, local_file_required: true, narrate: "Local file may still be requested" }
+  # --- Connected-party interest deductibility (30% EBITDA limitation, Finance Act/CITA s.24 as amended) ---
+  - id: tp.interest.limitation
+    when: { has_connected_party_debt: true }
+    then:
+      interest_limit_bps_of_ebitda: 3000
+      carryforward_years: 5
+      narrate: "Interest on connected-party debt deductible up to 30% of EBITDA; excess carried forward 5 years"
+  - id: tp.interest.excess
+    when: { has_connected_party_debt: true, interest_exceeds_limit: true }
+    then: { excess_interest_disallowed: true, narrate: "Excess connected-party interest disallowed in current year; carry forward max 5 years" }
+  # --- TP documentation disclosure ---
+  - id: tp.disclosure.required
+    when: { has_connected_party_transactions: true }
+    then: { tp_disclosure_required: true, narrate: "TP disclosure form required with annual CIT return (Reg 6)" }
+  # --- Deadlines ---
+  - id: tp.cbcr.notification
+    when: { cbcr_required: true }
+    then: { cbcr_notification_required: true, cbcr_deadline_months: 12, narrate: "CbCR due within 12 months of group accounting year-end; notify NRS of reporting entity" }

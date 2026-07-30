@@ -1,0 +1,54 @@
+# Optional dev stack — every service also runs standalone with zero deps.
+services:
+  einvoicing:
+    build:
+      context: .
+      dockerfile: services/einvoicing/Dockerfile
+    environment:
+      PORT: "8110"
+      AUTH_MODE: dev
+      DATA_DIR: /data
+    ports: ["8110:8110"]
+    volumes: ["einvoicing-data:/data"]
+
+  rev360:
+    image: python:3.12-slim
+    working_dir: /app/services/rev360
+    command: sh -c "pip install -e /app/packages/py && pip install -r requirements.txt uvicorn && uvicorn app.main:app --host 0.0.0.0 --port 8120"
+    environment:
+      AUTH_MODE: dev
+      DATA_DIR: /data
+    ports: ["8120:8120"]
+    volumes:
+      - .:/app
+      - rev360-data:/data
+
+  wht:
+    image: python:3.12-slim
+    working_dir: /app/services/wht
+    command: sh -c "pip install -e /app/packages/py && pip install -r requirements.txt uvicorn && uvicorn app.main:app --host 0.0.0.0 --port 8130"
+    environment:
+      AUTH_MODE: dev
+      DATA_DIR: /data
+    ports: ["8130:8130"]
+    volumes:
+      - .:/app
+      - wht-data:/data
+
+  tp-cbcr:
+    image: python:3.12-slim
+    working_dir: /app/services/tp-cbcr
+    command: sh -c "pip install -e /app/packages/py && pip install -r requirements.txt uvicorn && uvicorn app.main:app --host 0.0.0.0 --port 8140"
+    environment:
+      AUTH_MODE: dev
+      DATA_DIR: /data
+    ports: ["8140:8140"]
+    volumes:
+      - .:/app
+      - tpcbcr-data:/data
+
+volumes:
+  einvoicing-data:
+  rev360-data:
+  wht-data:
+  tpcbcr-data:
