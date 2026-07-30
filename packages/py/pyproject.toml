@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meridian-py"
+version = "1.0.0"
+description = "Shared Python helpers for the Meridian compliance suite (envelope, dev JWT, rp-* loader)"
+requires-python = ">=3.11"
+dependencies = ["pyyaml", "pyjwt", "httpx", "fastapi"]
+
+[tool.setuptools.packages.find]
+include = ["meridian_py*"]
