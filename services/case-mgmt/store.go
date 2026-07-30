@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,23 +11,25 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 
 // ---------- domain model ----------
 
 type Matter struct {
-	ID          string   `json:"id"`
-	TenantID    string   `json:"tenant_id"`
-	Ref         string   `json:"ref"` // e.g. MTR-2026-0001
-	Title       string   `json:"title"`
-	ClientID    string   `json:"client_id"`
-	ClientName  string   `json:"client_name"`
-	PracticeArea string  `json:"practice_area"` // tax-appeal|audit-defence|advisory|ombud-referral
-	Status      string   `json:"status"`        // intake|active|on-hold|closed
-	Counsel     []string `json:"counsel"`       // user ids
-	OpenedAt    string   `json:"opened_at"`
-	ClosedAt    string   `json:"closed_at,omitempty"`
-	Notes       string   `json:"notes,omitempty"`
+	ID           string   `json:"id"`
+	TenantID     string   `json:"tenant_id"`
+	Ref          string   `json:"ref"` // e.g. MTR-2026-0001
+	Title        string   `json:"title"`
+	ClientID     string   `json:"client_id"`
+	ClientName   string   `json:"client_name"`
+	PracticeArea string   `json:"practice_area"` // tax-appeal|audit-defence|advisory|ombud-referral
+	Status       string   `json:"status"`        // intake|active|on-hold|closed
+	Counsel      []string `json:"counsel"`       // user ids
+	OpenedAt     string   `json:"opened_at"`
+	ClosedAt     string   `json:"closed_at,omitempty"`
+	Notes        string   `json:"notes,omitempty"`
 }
 
 type Document struct {
@@ -46,7 +49,7 @@ type Deadline struct {
 	ID        string `json:"id"`
 	MatterID  string `json:"matter_id"`
 	Title     string `json:"title"`
-	DueAt     string `json:"due_at"` // RFC3339
+	DueAt     string `json:"due_at"`   // RFC3339
 	Severity  string `json:"severity"` // info|warning|critical
 	Status    string `json:"status"`   // open|met|missed|escalated
 	Escalated bool   `json:"escalated"`
@@ -63,6 +66,57 @@ type Store struct {
 	deadlines map[string]*Deadline
 	seq       int
 	logFile   *os.File
+	pg        *prodx.DocStore // non-nil when DATABASE_URL set (H1 prod)
+}
+
+// AttachPG attaches the Postgres document store (H1: DATABASE_URL) and loads
+// any rows not present in the local append-log. Postgres writes are
+// best-effort mirrors of the append-log (same doc shape, collection=kind).
+func (st *Store) AttachPG(ctx context.Context, pg *prodx.DocStore) {
+	st.mu.Lock()
+	st.pg = pg
+	st.mu.Unlock()
+	for _, kind := range []string{"matter", "doc", "deadline"} {
+		rows, err := pg.List(ctx, kind)
+		if err != nil {
+			logm("warn", "pg load "+kind+": "+err.Error())
+			continue
+		}
+		for _, raw := range rows {
+			st.indexPG(kind, raw)
+		}
+	}
+}
+
+func (st *Store) indexPG(kind string, raw json.RawMessage) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	switch kind {
+	case "matter":
+		var m Matter
+		if json.Unmarshal(raw, &m) == nil {
+			if _, ok := st.matters[m.ID]; !ok {
+				cp := m
+				st.matters[m.ID] = &cp
+			}
+		}
+	case "doc":
+		var d Document
+		if json.Unmarshal(raw, &d) == nil {
+			if _, ok := st.docs[d.ID]; !ok {
+				cp := d
+				st.docs[d.ID] = &cp
+			}
+		}
+	case "deadline":
+		var dl Deadline
+		if json.Unmarshal(raw, &dl) == nil {
+			if _, ok := st.deadlines[dl.ID]; !ok {
+				cp := dl
+				st.deadlines[dl.ID] = &cp
+			}
+		}
+	}
 }
 
 func NewStore(dir string) *Store {
@@ -82,12 +136,22 @@ type logRec struct {
 }
 
 func (st *Store) appendLog(kind string, v any) {
-	if st.logFile == nil {
-		return
+	data := mustJSON(v)
+	if st.logFile != nil {
+		b, _ := json.Marshal(logRec{Kind: kind, Data: json.RawMessage(data)})
+		st.logFile.Write(append(b, '\n'))
+		st.logFile.Sync()
 	}
-	b, _ := json.Marshal(logRec{Kind: kind, Data: json.RawMessage(mustJSON(v))})
-	st.logFile.Write(append(b, '\n'))
-	st.logFile.Sync()
+	if st.pg != nil {
+		var probe struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(data, &probe) == nil && probe.ID != "" {
+			if err := st.pg.Put(context.Background(), kind, probe.ID, data); err != nil {
+				logm("warn", "pg persist "+kind+": "+err.Error())
+			}
+		}
+	}
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }

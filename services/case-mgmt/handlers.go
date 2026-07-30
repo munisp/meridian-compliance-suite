@@ -80,9 +80,9 @@ func (s *Service) handleUpdateMatter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var patch struct {
-		Title   *string `json:"title"`
-		Status  *string `json:"status"`
-		Notes   *string `json:"notes"`
+		Title   *string  `json:"title"`
+		Status  *string  `json:"status"`
+		Notes   *string  `json:"notes"`
 		Counsel []string `json:"counsel"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&patch); err != nil {
