@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "hardening/*"]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.4"
+      - name: root module (packages + einvoicing)
+        run: |
+          go build ./... && go vet ./... && go test -race ./...
+      - name: case-mgmt
+        working-directory: services/case-mgmt
+        run: go build ./... && go vet ./... && go test -race ./...
+      - name: pos-vat
+        working-directory: services/pos-vat
+        run: go build ./... && go vet ./... && go test -race ./...
+      - name: vasp-carf
+        working-directory: services/vasp-carf
+        run: go build ./... && go vet ./... && go test -race ./...
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: etr pytest
+        working-directory: services/etr
+        run: |
+          pip install --user -r requirements.txt
+          python3 -m pytest -q
+
+  portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: compliance-portal build
+        working-directory: portals/compliance-portal
+        run: |
+          npm ci
+          npm run build
