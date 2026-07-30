@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+pyyaml
+pyjwt
+httpx
+sqlalchemy
+pytest

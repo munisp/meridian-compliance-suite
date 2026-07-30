@@ -1,0 +1,82 @@
+"""WHT credit ledger (SPEC 3 T7): SQLAlchemy; SQLite fallback in dev,
+Postgres when DATABASE_URL is set. Integer kobo only."""
+
+from __future__ import annotations
+
+import os
+import time
+
+from sqlalchemy import (Boolean, Column, Integer, String, create_engine,
+                        select, func)
+from sqlalchemy.orm import DeclarativeBase, Session
+
+DATA_DIR = os.environ.get("DATA_DIR", "/tmp/meridian-wht")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", f"sqlite:///{os.path.join(DATA_DIR, 'wht.db')}")
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Deduction(Base):
+    __tablename__ = "wht_deductions"
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String, default="")
+    vendor_tin = Column(String, index=True)
+    vendor_name = Column(String, default="")
+    payment_type = Column(String)
+    beneficiary = Column(String)
+    amount_kobo = Column(Integer)
+    rate_bps = Column(Integer)
+    wht_kobo = Column(Integer)
+    outcome = Column(String)
+    deduction_trigger = Column(String, default="")
+    deduction_date = Column(String, default="")
+    period = Column(String, index=True)   # YYYY-MM of deduction_date
+    remitted = Column(Boolean, default=False)
+    remit_batch = Column(String, default="")
+
+
+class Credit(Base):
+    __tablename__ = "wht_credits"
+    id = Column(String, primary_key=True)
+    vendor_tin = Column(String, index=True)
+    credit_kobo = Column(Integer)         # positive = credit, negative = applied
+    source = Column(String, default="")   # deduction id / adjustment ref
+    period = Column(String, default="")
+    note = Column(String, default="")
+    created_at = Column(String, default="")
+
+
+_engine = None
+
+
+def engine():
+    global _engine
+    if _engine is None:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        _engine = create_engine(DATABASE_URL)
+        Base.metadata.create_all(_engine)
+    return _engine
+
+
+def session() -> Session:
+    return Session(engine())
+
+
+def now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def credit_balance(sess: Session, vendor_tin: str) -> int:
+    total = sess.execute(
+        select(func.coalesce(func.sum(Credit.credit_kobo), 0))
+        .where(Credit.vendor_tin == vendor_tin)).scalar_one()
+    return int(total)
+
+
+def vendor_credits(sess: Session, vendor_tin: str) -> list[Credit]:
+    return list(sess.execute(
+        select(Credit).where(Credit.vendor_tin == vendor_tin)
+        .order_by(Credit.created_at)).scalars())
