@@ -1,0 +1,29 @@
+id: rp-etr-nta
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "NTA 2025: minimum ETR 15%; NTA-basis adjustments (development levy, priority-rule credits)"
+  as_gazetted: null
+  source_citation: "Nigeria Tax Act 2025 (Minimum Effective Tax provisions)"
+rules:
+  - id: etr.nta.minimum_rate
+    when: {}
+    then: { rate_bps: 1500, narrate: "15% minimum effective tax rate" }
+  - id: etr.nta.adjustment.development_levy
+    when: { basis: nta }
+    then: { kind: covered_tax_add, rule: development_levy, narrate: "Development levy (4% assessable) counts as covered tax" }
+  - id: etr.nta.adjustment.disallowed_fines
+    when: { basis: nta }
+    then: { kind: income_addback, rule: fines_penalties, narrate: "Fines and penalties added back to net income" }
+  - id: etr.nta.adjustment.priority_credit
+    when: { basis: nta }
+    then: { kind: covered_tax_add, rule: priority_sector_credit, narrate: "Priority-sector credits reduce covered taxes first" }
+  - id: etr.nta.qdmtt
+    when: {}
+    then:
+      qdmtt_jurisdictions: [NG]
+      upgrade_flag: qdmtt_upgrade
+      narrate: "Nigeria QDMTT collects domestic top-up when qdmtt_upgrade gate is armed"

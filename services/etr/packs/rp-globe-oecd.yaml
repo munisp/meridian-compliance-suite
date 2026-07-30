@@ -1,0 +1,41 @@
+id: rp-globe-oecd
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "OECD/G20 GloBE Model Rules (2022): ETR, SBIE Art. 5.3, IIR Art. 2.1"
+  as_gazetted: null
+  source_citation: "OECD GloBE Model Rules + Administrative Guidance"
+rules:
+  - id: globe.minimum_rate
+    when: {}
+    then: { rate_bps: 1500, narrate: "15% GloBE minimum rate" }
+  - id: globe.adjustment.stock_comp
+    when: { basis: globe }
+    then: { kind: income_addback, rule: stock_based_compensation, narrate: "Stock-based compensation election addback" }
+  - id: globe.adjustment.excluded_dividends
+    when: { basis: globe }
+    then: { kind: income_subtract, rule: excluded_dividends, narrate: "Excluded dividends (short-term portfolio) removed from income" }
+  - id: globe.adjustment.asymmetric_fx
+    when: { basis: globe }
+    then: { kind: income_addback, rule: asymmetric_fx, narrate: "Asymmetric FX gain/loss adjustment" }
+  - id: globe.sbie.transition
+    when: {}
+    then:
+      table:
+        "2024": { payroll_bps: 980, assets_bps: 780 }
+        "2025": { payroll_bps: 960, assets_bps: 760 }
+        "2026": { payroll_bps: 940, assets_bps: 740 }
+        "2027": { payroll_bps: 920, assets_bps: 720 }
+        "2028": { payroll_bps: 900, assets_bps: 700 }
+        "2029": { payroll_bps: 860, assets_bps: 660 }
+        "2030": { payroll_bps: 820, assets_bps: 620 }
+        "2031": { payroll_bps: 740, assets_bps: 580 }
+        "2032": { payroll_bps: 660, assets_bps: 540 }
+        "2033": { payroll_bps: 580, assets_bps: 500 }
+      narrate: "SBIE transition table (Art. 9.2): payroll and tangible-asset carve-out % in bps"
+  - id: globe.iir.ordering
+    when: {}
+    then: { order: [upe, pope], pope_threshold_bps: 8000, narrate: "IIR applies top-down; POPE (ownership < 80%) applies before UPE" }
