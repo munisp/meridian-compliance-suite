@@ -66,8 +66,51 @@ def _verify_hs256(token: str, secret: str) -> dict:
     return payload
 
 
+# ---------- keycloak auth: RS256 via JWKS (HARDENING.md H2) ----------
+
+_jwks_client = None
+
+
+def _keycloak_enabled() -> bool:
+    return os.environ.get("AUTH_MODE") == "keycloak" and bool(os.environ.get("KEYCLOAK_ISSUER"))
+
+
+def _verify_keycloak(token: str) -> dict:
+    """Verify an RS256 Keycloak token against the realm JWKS (PyJWKClient,
+    which caches keys and refreshes on unknown kid); validates iss/exp/aud
+    and maps realm_access.roles + resource_access[aud].roles into `roles`."""
+    global _jwks_client
+    import jwt  # PyJWT[crypto], imported lazily so dev mode needs nothing
+
+    issuer = os.environ["KEYCLOAK_ISSUER"].rstrip("/")
+    audience = os.environ.get("KEYCLOAK_AUDIENCE", "")
+    jwks_url = os.environ.get("KEYCLOAK_JWKS_URL") or f"{issuer}/protocol/openid-connect/certs"
+    if _jwks_client is None:
+        _jwks_client = jwt.PyJWKClient(jwks_url)
+    try:
+        key = _jwks_client.get_signing_key_from_jwt(token).key
+        payload = jwt.decode(
+            token, key, algorithms=["RS256"], issuer=issuer,
+            audience=audience or None,
+            options={"verify_aud": bool(audience), "require": ["exp", "iss", "sub"]})
+    except jwt.PyJWTError as e:
+        raise ValueError(str(e))
+    roles = list(payload.get("realm_access", {}).get("roles", []))
+    if audience:
+        roles += payload.get("resource_access", {}).get(audience, {}).get("roles", [])
+    payload["roles"] = roles
+    return payload
+
+
 async def auth(request: Request) -> dict:
     hdr = request.headers.get("authorization", "")
+    if _keycloak_enabled():
+        if hdr.startswith("Bearer "):
+            try:
+                return _verify_keycloak(hdr[7:])
+            except ValueError as e:
+                raise HTTPException(401, f"unauthorized: {e}")
+        raise HTTPException(401, "unauthorized: Bearer JWT required (AUTH_MODE=keycloak)")
     secret = os.environ.get("MERIDIAN_DEV_JWT_SECRET", "meridian-dev-secret")
     if hdr.startswith("Bearer "):
         try:
