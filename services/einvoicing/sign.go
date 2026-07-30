@@ -13,8 +13,8 @@ import (
 // T1/T2): supplier-side ed25519 signing. Dev keys are generated once and
 // persisted (or seeded deterministically via CSID_SEED_HEX).
 type CSIDSigner struct {
-	priv ed25519.PrivateKey
-	pub  ed25519.PublicKey
+	priv  ed25519.PrivateKey
+	pub   ed25519.PublicKey
 	keyID string
 }
 
