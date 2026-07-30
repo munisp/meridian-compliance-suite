@@ -1,0 +1,64 @@
+id: rp-ubl-bis
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "NRS e-invoicing mandate: invoices exchanged as UBL 2.1 / Peppol BIS Billing 3.0"
+  as_gazetted: null
+  source_citation: "Peppol BIS Billing 3.0; UBL 2.1 Invoice (OASIS); NRS e-invoice profile"
+signed: { algorithm: ed25519, key_id: governance-board-2026, signature: "DEV-UNSIGNED" }
+rules:
+  # UBL/Peppol BIS structural rules (invoice-level mandatory fields)
+  - id: ubl.inv.number.present
+    when: { invoice_number__exists: true }
+    then: { check_invoice_number: pass, narrate: "IBT-001 Invoice number present" }
+  - id: ubl.inv.number.missing
+    when: { invoice_number__exists: false }
+    then: { check_invoice_number: fail, violation: "BR-01: An Invoice shall have an Invoice number (IBT-001)", severity: fatal }
+  - id: ubl.inv.issue_date.present
+    when: { issue_date__exists: true }
+    then: { check_issue_date: pass, narrate: "IBT-002 Issue date present" }
+  - id: ubl.inv.issue_date.missing
+    when: { issue_date__exists: false }
+    then: { check_issue_date: fail, violation: "BR-02: An Invoice shall have an Issue date (IBT-002)", severity: fatal }
+  - id: ubl.inv.currency.ngn
+    when: { currency: NGN }
+    then: { check_currency: pass, narrate: "IBT-005 Document currency NGN" }
+  - id: ubl.inv.currency.other
+    when: { currency__ne: NGN }
+    then: { check_currency: warn, violation: "NRS profile prefers NGN document currency; FX must be stated", severity: warning }
+  - id: ubl.supplier.tin.present
+    when: { supplier_tin__exists: true }
+    then: { check_supplier_tin: pass, narrate: "Supplier TIN present (NRS profile mandatory)" }
+  - id: ubl.supplier.tin.missing
+    when: { supplier_tin__exists: false }
+    then: { check_supplier_tin: fail, violation: "BR-NRS-01: Supplier PartyTaxScheme shall carry TIN", severity: fatal }
+  - id: ubl.supplier.name.present
+    when: { supplier_name__exists: true }
+    then: { check_supplier_name: pass }
+  - id: ubl.supplier.name.missing
+    when: { supplier_name__exists: false }
+    then: { check_supplier_name: fail, violation: "BR-06: An Invoice shall contain the Seller name (IBT-027)", severity: fatal }
+  - id: ubl.customer.name.present
+    when: { customer_name__exists: true }
+    then: { check_customer_name: pass }
+  - id: ubl.customer.name.missing
+    when: { customer_name__exists: false }
+    then: { check_customer_name: fail, violation: "BR-07: An Invoice shall contain the Buyer name (IBT-044)", severity: fatal }
+  - id: ubl.totals.positive
+    when: { payable_amount_kobo__gt: 0 }
+    then: { check_totals: pass, narrate: "IBT-115 payable amount positive" }
+  - id: ubl.totals.nonpositive
+    when: { payable_amount_kobo__lte: 0 }
+    then: { check_totals: fail, violation: "BR-NRS-02: Payable amount shall be > 0", severity: fatal }
+  - id: ubl.lines.present
+    when: { line_count__gte: 1 }
+    then: { check_lines: pass, narrate: "IBT-126 at least one invoice line" }
+  - id: ubl.lines.missing
+    when: { line_count__lt: 1 }
+    then: { check_lines: fail, violation: "BR-16: An Invoice shall have at least one Invoice line", severity: fatal }
+  - id: ubl.vat.category.valid
+    when: { vat_category__in: [S, Z, E, AE, O] }
+    then: { check_vat_category: pass, narrate: "VAT category code recognised" }

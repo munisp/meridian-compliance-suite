@@ -1,0 +1,43 @@
+id: rp-mbs-business-rules
+version: 1.0.0
+effective_from: 2025-01-01
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: "MBS pre-clearance business rules for B2B e-invoices and B2C real-time reporting"
+  as_gazetted: null
+  source_citation: "NRS Merchant-Buyer-Supplier (MBS) e-invoicing pre-clearance specification"
+signed: { algorithm: ed25519, key_id: governance-board-2026, signature: "DEV-UNSIGNED" }
+rules:
+  # MBS pre-clearance business rules evaluated over canonical invoice context
+  - id: mbs.tin.format
+    when: { supplier_tin_len: 13 }
+    then: { check_tin_format: pass, narrate: "TIN is 13 digits" }
+  - id: mbs.tin.format.bad
+    when: { supplier_tin_len__ne: 13 }
+    then: { check_tin_format: fail, violation: "MBS-BR-01: Supplier TIN must be 13 digits", severity: fatal }
+  - id: mbs.amount.b2b.threshold
+    when: { invoice_type: B2B, payable_amount_kobo__gte: 1 }
+    then: { preclearance_required: true, narrate: "B2B invoices require MBS pre-clearance before issuance" }
+  - id: mbs.b2c.realtime
+    when: { invoice_type: B2C }
+    then: { preclearance_required: false, realtime_report_required: true, narrate: "B2C: real-time report within 24h, no pre-clearance" }
+  - id: mbs.vat.rate.standard
+    when: { vat_rate_bps: 750 }
+    then: { check_vat_rate: pass, narrate: "VAT 7.5% standard rate" }
+  - id: mbs.vat.rate.nonstandard
+    when: { vat_rate_bps__gt: 0, vat_rate_bps__ne: 750 }
+    then: { check_vat_rate: warn, violation: "MBS-BR-02: VAT rate differs from standard 7.5%", severity: warning }
+  - id: mbs.duplicate.guard
+    when: { duplicate: true }
+    then: { check_duplicate: fail, violation: "MBS-BR-03: duplicate invoice number for supplier", severity: fatal }
+  - id: mbs.lines.consistent
+    when: { totals_consistent: true }
+    then: { check_line_totals: pass, narrate: "line extensions sum to tax-exclusive amount" }
+  - id: mbs.lines.inconsistent
+    when: { totals_consistent: false }
+    then: { check_line_totals: fail, violation: "MBS-BR-04: line totals do not reconcile with document totals", severity: fatal }
+  - id: mbs.large.invoice.flag
+    when: { payable_amount_kobo__gte: 10000000000 }
+    then: { large_invoice_review: true, narrate: ">= N100m flagged for enhanced review" }
