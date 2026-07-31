@@ -90,10 +90,12 @@ func (s *InvoiceStore) index(inv *CanonicalInvoice) {
 	cp := *inv
 	s.byID[inv.ID] = &cp
 	if inv.IdempotencyKey != "" {
-		s.byIdemKey[inv.IdempotencyKey] = inv.ID
+		// tenant-prefixed: idempotency keys are scoped per tenant (audit fix)
+		s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey] = inv.ID
 	}
 	if inv.Supplier.TIN != "" && inv.InvoiceNumber != "" {
-		s.bySuppNum[inv.Supplier.TIN+"|"+inv.InvoiceNumber] = inv.ID
+		// tenant-prefixed: same supplier TIN + number in another tenant is NOT a duplicate
+		s.bySuppNum[inv.TenantID+"|"+inv.Supplier.TIN+"|"+inv.InvoiceNumber] = inv.ID
 	}
 }
 
@@ -107,7 +109,7 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if inv.IdempotencyKey != "" {
-		if id, dup := s.byIdemKey[inv.IdempotencyKey]; dup && id != inv.ID {
+		if id, dup := s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey]; dup && id != inv.ID {
 			return id, ErrIdempotentReplay
 		}
 	}
@@ -165,6 +167,6 @@ func (s *InvoiceStore) List() []*CanonicalInvoice {
 func (s *InvoiceStore) IsDuplicate(inv *CanonicalInvoice) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.bySuppNum[inv.Supplier.TIN+"|"+inv.InvoiceNumber]
+	id, ok := s.bySuppNum[inv.TenantID+"|"+inv.Supplier.TIN+"|"+inv.InvoiceNumber]
 	return ok && id != inv.ID
 }

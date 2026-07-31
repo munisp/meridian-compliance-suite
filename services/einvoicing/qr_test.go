@@ -1,0 +1,110 @@
+package main
+
+import (
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+// Golden matrix for
+// "NRS1|00012345-0001-20260731120000|12345678-0001|10750000|20260731120000|82bc92fe019f"
+// produced by the reference python qrcode library (byte mode, EC-M, v5, mask 0)
+// — the encoder was validated bit-exact against that library.
+var qrGoldenPayload = "NRS1|00012345-0001-20260731120000|12345678-0001|10750000|20260731120000|82bc92fe019f"
+var qrGoldenRows = []string{
+	"1111111001010101110110011001101111111",
+	"1000001010110100011110110101001000001",
+	"1011101001111111101110011011101011101",
+	"1011101001110010100110011001101011101",
+	"1011101011000111110100011001101011101",
+	"1000001001010001010101010101001000001",
+	"1111111010101010101010101010101111111",
+	"0000000000001011011101010101000000000",
+	"1010101001000101111011100110000010010",
+	"1111000101111001011011100110001101000",
+	"0010111010111010101011100010101100111",
+	"0110010000111010111001110101100001011",
+	"1001111010100000011001100111001101001",
+	"0011100101001010011001100110001101001",
+	"1100001000101010011010101110011011001",
+	"1111100001010010110101001101100101010",
+	"0000011100111000110011100111001101001",
+	"0100110011010010110011100110101101000",
+	"0011111010001110011010100010101010111",
+	"1011110011000001010001110111011101011",
+	"0100101100101111011001100110101101010",
+	"0110100110100100011001100100001101001",
+	"0100011110010000110010101100001011101",
+	"1111010101100100110101000101110100000",
+	"1111101010000110010001100110001101010",
+	"0100010011100000010001100010001101010",
+	"1001101001100010011010100000101111111",
+	"0110010000010101011101100111001100010",
+	"1010101111001000011101100110111111011",
+	"0000000011000110011001100110100010111",
+	"1111111000100110000010101011101010101",
+	"1000001001000001111101010101100011010",
+	"1011101011001100011001000110111111000",
+	"1011101000100010011001100111010010100",
+	"1011101010101010100011100111110010111",
+	"1000001001000101010111001100110101010",
+	"1111111010010110011101100110101011011",
+}
+
+func TestQRGoldenMatrix(t *testing.T) {
+	m, err := QRMatrix([]byte(qrGoldenPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != len(qrGoldenRows) {
+		t.Fatalf("size %d, want %d", len(m), len(qrGoldenRows))
+	}
+	for r, row := range qrGoldenRows {
+		for c, ch := range row {
+			want := ch == '1'
+			if m[r][c] != want {
+				t.Fatalf("module (%d,%d)=%v, want %v", r, c, m[r][c], want)
+			}
+		}
+	}
+}
+
+func TestQRPayloadSignAndVerify(t *testing.T) {
+	os.Setenv("QR_HMAC_KEY", "meridian-dev-qr-key")
+	inv := &CanonicalInvoice{
+		IRN:         "00012345-0001-20260731120000",
+		Supplier:    Party{TIN: "12345678-0001"},
+		PayableKobo: 10750000,
+		UpdatedAt:   time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
+	}
+	payload, sig := QRPayload(inv)
+	if sig != "82bc92fe019f" {
+		t.Fatalf("hmac mismatch: %s", sig)
+	}
+	if !VerifyQRPayload(payload, sig) {
+		t.Fatal("verify failed for good signature")
+	}
+	if VerifyQRPayload(payload, "deadbeef0000") {
+		t.Fatal("verify passed for bad signature")
+	}
+	full := payload + "|" + sig
+	if len(full) > 106 {
+		t.Fatalf("payload exceeds v6 capacity: %d bytes", len(full))
+	}
+	if _, err := QRMatrix([]byte(full)); err != nil {
+		t.Fatal(err)
+	}
+	svg := QRSVG(mustMatrix(t, full), 4)
+	if !strings.Contains(svg, "<svg") || !strings.Contains(svg, "<rect") {
+		t.Fatalf("bad svg: %.80s", svg)
+	}
+}
+
+func mustMatrix(t *testing.T, payload string) [][]bool {
+	m, err := QRMatrix([]byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}

@@ -26,6 +26,18 @@ jobs:
         working-directory: services/vasp-carf
         run: go build ./... && go vet ./... && go test -race ./...
 
+  pack-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: checkout canonical meridian-rule-packs
+        uses: actions/checkout@v4
+        with:
+          repository: munisp/meridian-rule-packs
+          path: meridian-rule-packs
+      - name: embedded packs must mirror canonical (drift guard)
+        run: python3 tools/check_embedded_sync.py --canonical meridian-rule-packs
+
   python:
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +47,16 @@ jobs:
           python-version: "3.12"
       - name: etr pytest
         working-directory: services/etr
+        run: |
+          pip install --user -r requirements.txt
+          python3 -m pytest -q
+      - name: wht pytest
+        working-directory: services/wht
+        run: |
+          pip install --user -r requirements.txt
+          python3 -m pytest -q
+      - name: insights pytest
+        working-directory: services/insights
         run: |
           pip install --user -r requirements.txt
           python3 -m pytest -q

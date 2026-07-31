@@ -1,0 +1,118 @@
+# rp-fmt-federal v1.0.0 — Meridian rule pack (SPEC §1.4 format)
+# Federal filing matrix — NRS-administered taxes
+id: rp-fmt-federal
+version: 1.0.0
+title: Federal filing matrix — NRS-administered taxes (VAT, CIT, WHT, CGT, TET/DevLevy, stamp duties)
+description: 'Canonical federal filing and payment deadlines: VAT 21st of following month, WHT (companies) 21st, CIT within
+  6 months of financial year end, PAYE 10th (state-administered but reported federally for uniformity), Development Levy with
+  CIT instalments, stamp duty stamping 30 days, e-invoice clearance before issuance. Consumed by the deadline/reminder engine
+  (nrs.reminders.due.v1).'
+effective_from: '2026-01-01'
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: Nigeria Tax Administration Act 2025 (filing/payment provisions); VAT Act; CITA; NTA 2025
+  as_gazetted: null
+  source_citation: NTAA 2025; VAT Act (as amended); CITA (as amended); Nigeria Tax Act 2025
+rules:
+- id: fmt.federal.vat
+  when:
+    tax: VAT
+  then:
+    frequency: monthly
+    deadline_day_of_month: 21
+    narrate: VAT return and payment due by the 21st day of the month following the transaction month (nil returns mandatory).
+  citation: VAT Act s.16 (as amended); NTAA 2025
+- id: fmt.federal.wht-companies
+  when:
+    tax: WHT
+    beneficiary: company
+  then:
+    frequency: monthly
+    deadline_day_of_month: 21
+    narrate: WHT deducted from corporate beneficiaries remitted to NRS by the 21st day of the following month (aligned with
+      rp-wht-2024 wht.remittance.deadline-company).
+  citation: WHT Regs 2024, reg. 6
+- id: fmt.federal.wht-individuals
+  when:
+    tax: WHT
+    beneficiary: individual
+  then:
+    frequency: monthly
+    deadline_day_of_month: 30
+    narrate: WHT on individuals remitted to the relevant State IRS by the 30th day of the following month.
+- id: fmt.federal.paye
+  when:
+    tax: PIT_PAYE
+  then:
+    frequency: monthly
+    deadline_day_of_month: 10
+    narrate: PAYE remitted by the 10th day of the following month to the State IRS (uniform federal reference; see rp-fmt-*
+      state packs for administration detail).
+  citation: PITA s.81
+- id: fmt.federal.cit-annual
+  when:
+    tax: CIT
+  then:
+    frequency: annual
+    deadline_months_after_year_end: 6
+    narrate: 'CIT return due within 6 months of the end of the accounting year; tax paid in instalments on self-assessment.
+      New companies: within 18 months of incorporation or 6 months after first year end, whichever is earlier.'
+  citation: CITA s.55 (as amended); NTAA 2025
+- id: fmt.federal.cit-provisional
+  when:
+    tax: CIT
+    filing: provisional
+  then:
+    deadline_months_after_year_start: 3
+    narrate: Provisional tax return within 3 months of the start of the year (legacy practice; retained for back periods).
+- id: fmt.federal.devlevy
+  when:
+    tax: DevelopmentLevy
+  then:
+    frequency: annual
+    deadline: with_cit_return
+    narrate: Development Levy (4% of assessable profit, rp-education-ng cit.development-levy) assessed and paid with the CIT
+      return.
+- id: fmt.federal.cgt
+  when:
+    tax: CGT
+  then:
+    frequency: annual
+    deadline: with_income_tax_return
+    narrate: Chargeable gains reported with the annual income tax return for the year of disposal (rp-cgt).
+- id: fmt.federal.stamp-duty
+  when:
+    tax: StampDuty
+  then:
+    deadline_days: 30
+    narrate: Chargeable instruments stamped within 30 days of execution (rp-stamp-duty sd.deadline.stamping).
+- id: fmt.federal.einvoice
+  when:
+    tax: VAT
+    document: e_invoice
+  then:
+    deadline: before_issuance
+    narrate: MBS pre-clearance (IRN + cryptographic stamp) must complete BEFORE the invoice is issued to the buyer (rp-mbs-business-rules
+      mbs.preclearance.mandatory); B2C large taxpayers report aggregated receipts within 24 hours.
+- id: fmt.federal.pit-direct
+  when:
+    tax: PIT_direct_assessment
+  then:
+    frequency: annual
+    deadline_days_after_year_start: 90
+    narrate: Self-employed/direct assessment returns within 90 days of the start of the year (by 31 March).
+- id: fmt.federal.employer-annual
+  when:
+    tax: PIT_PAYE
+    filing: employer_annual_return
+  then:
+    frequency: annual
+    deadline_month: 1
+    deadline_day_of_month: 31
+    narrate: Employer annual emolument returns (Form H1) by 31 January of the following year.
+signed:
+  algorithm: ed25519
+  key_id: governance-board-2026
+  signature: 7640891474774e72a1380b6dd01424e0e542e9366af71b8750e65c85eb41965345cdbbd6aec6fbce1c4729ff1de3510fa78d0a3609a40da0dcf3b5f65f155709

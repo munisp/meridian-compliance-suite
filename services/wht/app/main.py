@@ -52,10 +52,13 @@ def readyz():
 
 
 class EvaluateIn(BaseModel):
-    payment_type: str = Field(..., description="goods|services|contract|dividend|interest|rent|royalty|commission")
+    payment_type: str = Field(..., description="canonical rp-wht-2024 vocabulary: dividend|interest|rent|royalty|supply_of_goods_materials|construction|consultancy|professional|technical|management|services|commission|directors_fees (legacy aliases goods/contract/service_fee/director_fee accepted)")
     beneficiary: str = Field("company", description="company|individual")
     amount_kobo: int = Field(..., gt=0)
-    monthly_amount_kobo: Optional[int] = None
+    supplier_monthly_turnover_kobo: Optional[int] = Field(
+        None, description="supplier's ACTUAL monthly turnover (small-company carve-out; never defaulted from amount)")
+    supplier_size: str = Field("", description="small|medium|large (carve-out needs 'small')")
+    beneficiary_residence: str = Field("", description="resident|non_resident")
     supplier_tin: str = ""
     nin: str = ""
     payment_date: str = ""

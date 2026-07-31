@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -131,6 +132,7 @@ func main() {
 	mux.HandleFunc("POST /v1/invoices", srv.handleCreateInvoice)
 	mux.HandleFunc("GET /v1/invoices/{id}", srv.handleGetInvoice)
 	mux.HandleFunc("POST /v1/invoices/{id}/preclear", srv.handlePreclear)
+	mux.HandleFunc("GET /v1/invoices/{id}/qr", srv.handleGetQR)
 	mux.HandleFunc("POST /v1/b2c/report", srv.handleB2CReport)
 	mux.HandleFunc("GET /v1/replay", srv.handleReplayList)
 	mux.HandleFunc("POST /v1/replay/{seq}", srv.handleReplayOne)
@@ -154,14 +156,11 @@ func main() {
 // idempotency keys (Idempotency-Key header) and offline-queue semantics.
 func (s *Server) handleCreateInvoice(w http.ResponseWriter, r *http.Request) {
 	adapterName := r.URL.Query().Get("adapter")
-	body := make([]byte, 0, 1<<20)
-	buf := make([]byte, 1<<20)
-	for {
-		n, err := r.Body.Read(buf)
-		body = append(body, buf[:n]...)
-		if err != nil {
-			break
-		}
+	// bounded read: reject payloads > 4 MiB (audit fix: unbounded body -> memory DoS)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
+	if err != nil {
+		devjwt.Problem(w, 413, "payload too large", err.Error())
+		return
 	}
 	adapter, err := AdapterFor(adapterName, r.Header.Get("Content-Type"), body)
 	if err != nil {
@@ -219,6 +218,12 @@ func (s *Server) handleGetInvoice(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
 		return
 	}
+	if claims, cerr := devjwt.FromContext(r); cerr == nil && claims.TenantID != "" &&
+		inv.TenantID != "" && inv.TenantID != claims.TenantID {
+		// tenant isolation: never reveal existence across tenants (audit fix)
+		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
+		return
+	}
 	if r.URL.Query().Get("format") == "ubl" {
 		xmlBytes, err := GenerateUBL(inv)
 		if err != nil {
@@ -230,6 +235,38 @@ func (s *Server) handleGetInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, inv)
+}
+
+// handleGetQR returns the NRS verification QR (payload + HMAC signature + SVG)
+// for a cleared invoice (MBS hard requirement: QR on the issued invoice).
+func (s *Server) handleGetQR(w http.ResponseWriter, r *http.Request) {
+	inv, ok := s.store.Get(r.PathValue("id"))
+	if !ok {
+		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
+		return
+	}
+	if claims, cerr := devjwt.FromContext(r); cerr == nil && claims.TenantID != "" &&
+		inv.TenantID != "" && inv.TenantID != claims.TenantID {
+		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
+		return
+	}
+	if inv.IRN == "" {
+		devjwt.Problem(w, 409, "not cleared", "invoice has no IRN yet — run pre-clearance first")
+		return
+	}
+	payload, sig := QRPayload(inv)
+	full := payload + "|" + sig
+	matrix, err := QRMatrix([]byte(full))
+	if err != nil {
+		devjwt.Problem(w, 500, "qr error", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"invoice_id": inv.ID, "irn": inv.IRN,
+		"payload": full, "signature": sig,
+		"qr_svg":    QRSVG(matrix, 4),
+		"algorithm": "HMAC-SHA256(truncated 12 hex) over NRS1|IRN|TIN|payableKobo|ts",
+	})
 }
 
 // handlePreclear runs wf-mbs-preclearance for the invoice.

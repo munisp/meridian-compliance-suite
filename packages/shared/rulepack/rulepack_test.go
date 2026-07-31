@@ -10,48 +10,52 @@ func TestLoadEmbeddedAndEvaluateWHT(t *testing.T) {
 	if p.Ref() != "rp-wht-2024@1.0.0" {
 		t.Fatalf("ref=%s", p.Ref())
 	}
-	// services to a company, valid TIN, N1m (<= N2m carve-out)
+	// Canonical pack contexts (rule-packs repo vocabulary, SPEC §1.4 operator maps).
+	// services to a small company with TIN, monthly turnover N1m (<= N2m carve-out)
 	d := Evaluate(p, map[string]any{
-		"payment_type":         "services",
-		"beneficiary":          "company",
-		"has_tin":              true,
-		"monthly_amount_kobo":  100000000,
-		"payment_date__exists": true,
-		"payment_date":         "2026-01-10",
+		"payment_type":                   "services",
+		"beneficiary":                    "company",
+		"supplier_tin":                   "12345678-0001",
+		"supplier_size":                  "small",
+		"supplier_monthly_turnover_kobo": 100000000,
+		"payment_event":                  "payment",
 	})
 	if d.Attrs["rate_bps"] != 0 {
 		t.Fatalf("expected carve-out rate 0, got %v", d.Attrs["rate_bps"])
 	}
-	if d.Attrs["small_company_carveout"] != true {
-		t.Fatalf("expected carve-out flag, trace=%v", d.Trace)
-	}
-	// services, company, valid TIN, N5m -> 2%
+	// services, company, valid TIN, N5m monthly -> 5% (canonical rate)
 	d2 := Evaluate(p, map[string]any{
-		"payment_type":        "services",
-		"beneficiary":         "company",
-		"has_tin":             true,
-		"monthly_amount_kobo": 500000000,
+		"payment_type":                   "services",
+		"beneficiary":                    "company",
+		"supplier_tin":                   "12345678-0001",
+		"supplier_monthly_turnover_kobo": 500000000,
 	})
-	if d2.Attrs["rate_bps"] != 200 {
-		t.Fatalf("expected 200bps, got %v", d2.Attrs["rate_bps"])
+	if d2.Attrs["rate_bps"] != 500 {
+		t.Fatalf("expected 500bps, got %v", d2.Attrs["rate_bps"])
+	}
+	// royalty: company 10%, individual 5% (embedded drift had them swapped)
+	d3 := Evaluate(p, map[string]any{"payment_type": "royalty", "beneficiary": "company", "supplier_tin": "t"})
+	if d3.Attrs["rate_bps"] != 1000 {
+		t.Fatalf("royalty company expected 1000bps, got %v", d3.Attrs["rate_bps"])
+	}
+	d4 := Evaluate(p, map[string]any{"payment_type": "royalty", "beneficiary": "individual", "supplier_nin": "n"})
+	if d4.Attrs["rate_bps"] != 500 {
+		t.Fatalf("royalty individual expected 500bps, got %v", d4.Attrs["rate_bps"])
 	}
 }
 
 func TestNoTINDoubleRate(t *testing.T) {
 	p, _ := LoadEmbedded("rp-wht-2024", "")
 	d := Evaluate(p, map[string]any{
-		"payment_type":        "services",
-		"beneficiary":         "company",
-		"has_tin":             false,
-		"has_nin":             false,
-		"identity_ok":         false,
-		"monthly_amount_kobo": 500000000,
+		"payment_type": "services",
+		"beneficiary":  "company",
+		// no supplier_tin, no supplier_nin -> Reg 5 double rate
 	})
-	if d.Attrs["rate_multiplier"] != 2 {
-		t.Fatalf("expected double rate, got %v", d.Attrs["rate_multiplier"])
+	if d.Attrs["rate_multiplier_bps"] != 20000 {
+		t.Fatalf("expected double rate multiplier 20000bps, got %v", d.Attrs["rate_multiplier_bps"])
 	}
-	if d.Attrs["rate_bps"] != 200 {
-		t.Fatalf("base rate 200 expected, got %v", d.Attrs["rate_bps"])
+	if d.Attrs["rate_bps"] != 500 {
+		t.Fatalf("base rate 500 expected, got %v", d.Attrs["rate_bps"])
 	}
 }
 
@@ -59,13 +63,12 @@ func TestNINAcceptable(t *testing.T) {
 	p, _ := LoadEmbedded("rp-wht-2024", "")
 	d := Evaluate(p, map[string]any{
 		"payment_type": "services", "beneficiary": "individual",
-		"has_tin": false, "has_nin": true, "identity_ok": false,
-		"monthly_amount_kobo": 500000000,
+		"supplier_nin": "12345678901",
 	})
-	if d.Attrs["identity_ok"] != true {
+	if d.Attrs["decision"] != "identity_satisfied" {
 		t.Fatalf("NIN should satisfy identity: %v", d.Attrs)
 	}
-	if _, doubled := d.Attrs["rate_multiplier"]; doubled {
+	if _, doubled := d.Attrs["rate_multiplier_bps"]; doubled {
 		t.Fatalf("must not double when NIN present: %v", d.Attrs)
 	}
 }

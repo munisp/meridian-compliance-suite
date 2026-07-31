@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -30,9 +31,14 @@ func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 func unb64(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) }
 
 // Secret returns the configured dev secret or a documented localhost default.
+// The insecure default is only ever returned in dev mode; with AUTH_MODE
+// explicitly set to a non-dev value, a missing secret is fatal (fail closed).
 func Secret() string {
 	if s := os.Getenv("MERIDIAN_DEV_JWT_SECRET"); s != "" {
 		return s
+	}
+	if mode := os.Getenv("AUTH_MODE"); mode != "" && mode != "dev" {
+		log.Fatalf("AUTH_MODE=%s requires MERIDIAN_DEV_JWT_SECRET (or keycloak config); no insecure default", mode)
 	}
 	return "meridian-dev-secret-change-me-32!"
 }

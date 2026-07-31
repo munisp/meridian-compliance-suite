@@ -15,7 +15,7 @@ export default function Wht() {
     try {
       const res = await api('wht').post('/v1/wht/evaluate', {
         payment_type: form.payment_type, beneficiary: form.beneficiary,
-        amount_kobo: Math.round(parseFloat(form.amount) * 100), vendor_tin: form.vendor_tin || undefined,
+        amount_kobo: Math.round(parseFloat(form.amount) * 100), supplier_tin: form.vendor_tin || undefined,
       })
       setResult(res.data)
     } catch (err) { setError(err) } finally { setBusy(false) }
@@ -46,7 +46,7 @@ export default function Wht() {
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label">Payment type</label>
                 <select className="input" value={form.payment_type} onChange={(e) => setForm({ ...form, payment_type: e.target.value })}>
-                  {['dividend', 'interest', 'royalty', 'rent', 'service_fee', 'contract', 'commission', 'director_fee'].map((p) => <option key={p}>{p}</option>)}
+                  {['dividend', 'interest', 'royalty', 'rent', 'services', 'construction', 'supply_of_goods_materials', 'commission', 'directors_fees'].map((p) => <option key={p}>{p}</option>)}
                 </select></div>
               <div><label className="label">Beneficiary</label>
                 <select className="input" value={form.beneficiary} onChange={(e) => setForm({ ...form, beneficiary: e.target.value })}>

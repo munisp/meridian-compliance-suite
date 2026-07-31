@@ -1,3 +1,9 @@
+"""WHT engine tests — canonical rp-wht-2024 pack (byte-identical to rule-packs repo).
+
+Rates per Deduction of Tax at Source (Withholding) Regulations 2024:
+  dividend/interest/rent 10%/10%, royalty 10% corp / 5% ind,
+  goods & construction 2%/2%, services & commission 5%/5%, directors' fees 10%.
+"""
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -13,41 +19,75 @@ def test_health_ready():
 
 
 def test_base_rates_company_vs_individual():
-    # services, company, valid TIN, above carve-out -> 2%
+    # services, company, valid TIN -> 5% (canonical; embedded drift had 2%)
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "services", "beneficiary": "company",
         "amount_kobo": 5_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-02-10"})
     body = r.json()
-    assert body["rate_bps"] == 200
-    assert body["wht_kobo"] == 5_000_000_00 * 200 // 10_000  # 2% of N5m
+    assert body["rate_bps"] == 500
+    assert body["wht_kobo"] == 5_000_000_00 * 500 // 10_000  # 5% of N5m
     assert body["deduction_trigger"] == "payment"
-    # same, individual -> 5%
+    # services, individual -> 5%
     r2 = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "services", "beneficiary": "individual",
         "amount_kobo": 5_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-02-10"})
     assert r2.json()["rate_bps"] == 500
-    # dividend 10% (amount above the N2m carve-out)
+    # dividend 10%
     r3 = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "dividend", "beneficiary": "company",
         "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-02-10"})
     assert r3.json()["rate_bps"] == 1000
+    # royalty: company 10%, individual 5% (drift had them swapped)
+    r4 = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "royalty", "beneficiary": "company",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r4.json()["rate_bps"] == 1000
+    r5 = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "royalty", "beneficiary": "individual",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r5.json()["rate_bps"] == 500
+    # goods & construction 2% for BOTH beneficiary classes (drift had 5% ind)
+    for ptype in ("supply_of_goods_materials", "construction"):
+        for bene in ("company", "individual"):
+            rr = client.post("/v1/wht/evaluate", headers=H, json={
+                "payment_type": ptype, "beneficiary": bene,
+                "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+                "payment_date": "2026-02-10"})
+            assert rr.json()["rate_bps"] == 200, (ptype, bene)
+
+
+def test_legacy_aliases_mapped():
+    # goods -> supply_of_goods_materials, contract -> construction (2%)
+    for alias in ("goods", "contract"):
+        r = client.post("/v1/wht/evaluate", headers=H, json={
+            "payment_type": alias, "beneficiary": "company",
+            "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+            "payment_date": "2026-02-10"})
+        assert r.json()["rate_bps"] == 200, alias
+
+
+def test_unknown_payment_type_422():
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "service_fee_typo", "beneficiary": "company",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123"})
+    assert r.status_code == 422
 
 
 def test_earlier_of_payment_or_settlement():
-    # settlement earlier -> trigger settlement
     r = client.post("/v1/wht/evaluate", headers=H, json={
-        "payment_type": "contract", "beneficiary": "company",
+        "payment_type": "construction", "beneficiary": "company",
         "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-03-15", "settlement_date": "2026-03-01"})
     body = r.json()
     assert body["deduction_trigger"] == "settlement"
     assert body["deduction_date"] == "2026-03-01"
-    # payment earlier -> trigger payment
     r2 = client.post("/v1/wht/evaluate", headers=H, json={
-        "payment_type": "contract", "beneficiary": "company",
+        "payment_type": "construction", "beneficiary": "company",
         "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-03-01", "settlement_date": "2026-03-15"})
     assert r2.json()["deduction_trigger"] == "payment"
@@ -55,11 +95,12 @@ def test_earlier_of_payment_or_settlement():
 
 
 def test_no_tin_double_rate():
+    # commission company 5% -> doubled to 10% without TIN
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "commission", "beneficiary": "company",
         "amount_kobo": 5_000_000_00, "payment_date": "2026-02-10"})
     body = r.json()
-    assert body["rate_bps"] == 400  # 2% doubled
+    assert body["rate_bps"] == 1000
     assert body["no_tin_double_applied"] is True
 
 
@@ -75,44 +116,60 @@ def test_nin_acceptable_for_individual():
 
 
 def test_small_company_carveout():
-    # <= N2m/month with valid TIN -> exempt via carve-out
+    # small company (turnover <= N2m/month), valid TIN -> no deduction
     r = client.post("/v1/wht/evaluate", headers=H, json={
-        "payment_type": "goods", "beneficiary": "company",
-        "amount_kobo": 1_500_000_00, "monthly_amount_kobo": 1_500_000_00,
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
+        "amount_kobo": 1_500_000_00,
+        "supplier_size": "small",
+        "supplier_monthly_turnover_kobo": 1_500_000_00,
         "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
     body = r.json()
     assert body["rate_bps"] == 0
     assert body["small_company_carveout"] is True
     assert body["wht_kobo"] == 0
-    # without valid TIN, carve-out does not apply -> base rate doubled
+    # boundary: turnover EXACTLY N2m is still carved out (lte)
+    rb = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
+        "amount_kobo": 2_000_000_00,
+        "supplier_size": "small",
+        "supplier_monthly_turnover_kobo": 2_000_000_00,
+        "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
+    assert rb.json()["small_company_carveout"] is True
+    # audit fix: a <= N2m PAYMENT alone (no size/turnover facts) must NOT carve out
     r2 = client.post("/v1/wht/evaluate", headers=H, json={
-        "payment_type": "goods", "beneficiary": "company",
-        "amount_kobo": 1_500_000_00, "monthly_amount_kobo": 1_500_000_00,
-        "payment_date": "2026-02-10"})
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
+        "amount_kobo": 1_500_000_00,
+        "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
     body2 = r2.json()
     assert body2["small_company_carveout"] is False
-    assert body2["rate_bps"] == 400  # 2% x2 (no TIN)
+    assert body2["rate_bps"] == 200
 
 
 def test_exemptions():
-    # direct debit exemption
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "services", "beneficiary": "company",
         "amount_kobo": 50_000_000_00, "supplier_tin": "1234567890123",
         "via_direct_debit": True, "payment_date": "2026-02-10"})
     assert r.json()["exempt"] is True and r.json()["rate_bps"] == 0
-    # broker exemption
     r2 = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "commission", "beneficiary": "company",
         "amount_kobo": 50_000_000_00, "supplier_tin": "1234567890123",
         "via_broker": True, "payment_date": "2026-02-10"})
     assert r2.json()["exempt"] is True
-    # manufacturer selling own goods
     r3 = client.post("/v1/wht/evaluate", headers=H, json={
-        "payment_type": "goods", "beneficiary": "company",
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
         "amount_kobo": 50_000_000_00, "supplier_tin": "1234567890123",
         "supplier_is_manufacturer": True, "payment_date": "2026-02-10"})
     assert r3.json()["exempt"] is True
+
+
+def test_rounding_half_up_kobo():
+    # 2% of 25 kobo = 0.5 kobo -> pack-mandated round() gives 1 (floor gave 0)
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "construction", "beneficiary": "company",
+        "amount_kobo": 25, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["wht_kobo"] == 1
 
 
 def test_tin_verification():
@@ -125,37 +182,30 @@ def test_tin_verification():
 
 
 def test_ledger_credits_and_remit_file():
-    # record two deductions
     for i in range(2):
         r = client.post("/v1/wht/deductions", headers=H, json={
             "payment_type": "services", "beneficiary": "company",
             "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
             "vendor_name": "Acme Ltd", "payment_date": "2026-02-1%d" % i})
         assert r.status_code == 201
-    # credits before remit: none yet
     bal = client.get("/v1/wht/credits/1234567890123", headers=H).json()
     assert bal["balance_kobo"] == 0
-    # generate remittance file via workflow
     rf = client.post("/v1/wht/remit-file", headers=H, json={"period": "2026-02"})
     assert rf.status_code == 201
     body = rf.json()
-    per_ded = 10_000_000_00 * 200 // 10_000  # 2% of N10m = 20,000,000 kobo
+    per_ded = 10_000_000_00 * 500 // 10_000  # 5% of N10m = 50,000,000 kobo
     assert body["total_wht_kobo"] == 2 * per_ded
     assert "batch_id,vendor_tin" in body["files"]["csv"]
     assert "<WhtRemittance" in body["files"]["xml"]
-    # credits posted after remit
     bal2 = client.get("/v1/wht/credits/1234567890123", headers=H).json()
     assert bal2["balance_kobo"] == 2 * per_ded
-    # apply credit
     ap = client.post("/v1/wht/credits/1234567890123/apply", headers=H,
                      json={"amount_kobo": per_ded, "note": "offset CIT"})
     assert ap.status_code == 201
     assert ap.json()["balance_kobo"] == per_ded
-    # over-apply rejected
     over = client.post("/v1/wht/credits/1234567890123/apply", headers=H,
                        json={"amount_kobo": 999_000_000})
     assert over.status_code == 422
-    # workflow history
     wf = client.get("/v1/wht/workflows", headers=H).json()
     assert wf["registered"] == ["wf-wht-remit-schedule"]
     assert len(wf["runs"]) >= 1
