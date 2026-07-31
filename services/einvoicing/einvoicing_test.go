@@ -286,3 +286,69 @@ func TestMultiAPPRouter(t *testing.T) {
 		t.Fatalf("route: %v %+v", err, app2)
 	}
 }
+
+// TestPortalPayloadContract replays the EXACT JSON the compliance-portal
+// Einvoicing page posts to /v1/invoices (portals/compliance-portal/src/pages/
+// Einvoicing.tsx) through RESTAdapter.Parse + Normalise + Validator. Guards the
+// audit finding where supplier_tin/buyer_tin/qty were silently dropped.
+func TestPortalPayloadContract(t *testing.T) {
+	portalPayload := `{
+	  "invoice_number": "WEB-1785000000000",
+	  "invoice_type": "B2B",
+	  "issue_date": "2026-07-31",
+	  "currency": "NGN",
+	  "supplier": {"tin": "12345678-0001", "name": "Supplier 12345678-0001", "country": "NG"},
+	  "customer": {"tin": "87654321-0001", "name": "Buyer 87654321-0001", "country": "NG"},
+	  "lines": [{"id": "1", "description": "Consulting services",
+	    "quantity_milli": 1000, "unit_price_kobo": 10000000,
+	    "vat_category": "S", "vat_rate_bps": 750}]
+	}`
+	invs, err := RESTAdapter{}.Parse([]byte(portalPayload))
+	if err != nil {
+		t.Fatalf("portal payload must parse: %v", err)
+	}
+	if len(invs) != 1 {
+		t.Fatalf("expected 1 invoice, got %d", len(invs))
+	}
+	inv := invs[0]
+	if inv.Supplier.TIN != "12345678-0001" || inv.Customer.TIN != "87654321-0001" {
+		t.Fatalf("party TINs dropped: %+v / %+v", inv.Supplier, inv.Customer)
+	}
+	inv.Normalise()
+	if inv.Lines[0].LineTotalKobo != 10000000 {
+		t.Fatalf("line total not computed from quantity_milli: %+v", inv.Lines[0])
+	}
+	if inv.PayableKobo != 10750000 { // N100,000 + 7.5% VAT
+		t.Fatalf("payable wrong: %d", inv.PayableKobo)
+	}
+	v := NewValidator()
+	violations, fatal, err := v.Validate(inv, false)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if fatal {
+		t.Fatalf("portal invoice must pass validation, violations: %+v", violations)
+	}
+}
+
+// TestLegacyPortalShapeFailsLoud documents the OLD broken portal shape: unknown
+// fields are dropped and validation must fail fatally (not silently clear).
+func TestLegacyPortalShapeFailsLoud(t *testing.T) {
+	legacy := `{"supplier_tin": "12345678-0001", "buyer_tin": "87654321-0001",
+	  "lines": [{"description": "Consulting services", "qty": 1, "unit_price_kobo": 10000000}],
+	  "currency": "NGN"}`
+	invs, err := RESTAdapter{}.Parse([]byte(legacy))
+	if err != nil || len(invs) != 1 {
+		t.Fatalf("parse: %v", err)
+	}
+	inv := invs[0]
+	inv.Normalise()
+	v := NewValidator()
+	_, fatal, err := v.Validate(inv, false)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !fatal {
+		t.Fatalf("legacy shape must fail validation (missing TINs/zero totals)")
+	}
+}
