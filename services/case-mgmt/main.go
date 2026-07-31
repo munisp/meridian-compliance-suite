@@ -70,15 +70,16 @@ func main() {
 		worm: worm, notify: notify, stopCh: make(chan struct{}),
 	}
 	// H2: AUTH_MODE=keycloak selects RS256/JWKS verification.
+	// FAIL CLOSED (audit fix H-1): a keycloak deployment missing its OIDC
+	// configuration refuses to boot rather than silently falling back to the
+	// dev auth path (forgeable X-Dev-Role header) in production.
 	if cfg.AuthMode == "keycloak" {
-		if v := authx.KeycloakVerifierFromEnv(); v != nil {
-			svc.kc = v
-			log.Printf("profile=prod component=auth (keycloak issuer=%s)", v.Issuer)
-		} else {
-			log.Printf("profile=dev component=auth (AUTH_MODE=keycloak but KEYCLOAK_ISSUER unset)")
-			cfg.AuthMode = "dev"
-			svc.cfg = cfg
+		v := authx.KeycloakVerifierFromEnv()
+		if v == nil {
+			log.Fatal("AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset; refusing to start (no dev fallback)")
 		}
+		svc.kc = v
+		log.Printf("profile=prod component=auth (keycloak issuer=%s)", v.Issuer)
 	} else {
 		log.Printf("profile=dev component=auth")
 	}
