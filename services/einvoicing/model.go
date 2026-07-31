@@ -26,7 +26,7 @@ type Party struct {
 // InvoiceLine: money is integer kobo ONLY (SPEC §1.3). Quantity in milli-units
 // (1000 = 1 unit) so fractional quantities stay integral.
 type InvoiceLine struct {
-	ID            string `json:"id,omitempty"`
+	ID            string `json:"id"`
 	Description   string `json:"description"`
 	QuantityMilli int64  `json:"quantity_milli"`
 	UnitPriceKobo int64  `json:"unit_price_kobo"`
