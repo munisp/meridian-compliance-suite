@@ -37,6 +37,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on dividends to a company
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.dividend.individual
   when:
     payment_type: dividend
@@ -44,6 +45,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on dividends to an individual
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.interest.company
   when:
     payment_type: interest
@@ -51,6 +53,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on interest to a company
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.interest.individual
   when:
     payment_type: interest
@@ -58,6 +61,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on interest to an individual
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.rent.company
   when:
     payment_type: rent
@@ -65,6 +69,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on rent to a company
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.rent.individual
   when:
     payment_type: rent
@@ -72,6 +77,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on rent to an individual
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.royalty.company
   when:
     payment_type: royalty
@@ -79,6 +85,7 @@ rules:
   then:
     rate_bps: 1000
     narrate: WHT 10% on royalties to a company
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.royalty.individual
   when:
     payment_type: royalty
@@ -86,6 +93,7 @@ rules:
   then:
     rate_bps: 500
     narrate: WHT 5% on royalties to an individual
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.goods-supply.any
   when:
     payment_type: supply_of_goods_materials
@@ -96,6 +104,7 @@ rules:
   then:
     rate_bps: 200
     narrate: WHT 2% on supply of goods and materials
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.construction.core
   when:
     payment_type: construction
@@ -200,6 +209,7 @@ rules:
   then:
     rate_bps: 500
     narrate: WHT 5% on commission
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule"
 - id: wht.rate.directors-fees.individual
   when:
     payment_type: directors_fees
@@ -315,12 +325,14 @@ rules:
   then:
     rate_bps: 0
     narrate: No WHT on franked investment income redistributed.
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.exempt.direct-debit
   when:
     payment_channel: direct_debit
   then:
     rate_bps: 0
     narrate: 'Exempt: payments made by direct debit from the payer''s bank account.'
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.exempt.broker-securities
   when:
     payment_channel: broker
@@ -328,6 +340,7 @@ rules:
   then:
     rate_bps: 0
     narrate: 'Exempt: securities transactions settled through a broker/dealer.'
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.exempt.imported-goods
   when:
     payment_type: supply_of_goods_materials
@@ -335,6 +348,7 @@ rules:
   then:
     rate_bps: 0
     narrate: 'Exempt: imported goods where the margin does not represent services performed in Nigeria.'
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.exempt.manufactured-goods
   when:
     payment_type: supply_of_goods_materials
@@ -342,6 +356,7 @@ rules:
   then:
     rate_bps: 0
     narrate: 'Exempt: goods manufactured or produced by the supplier.'
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.exempt.telephone-airline
   when:
     payment_type:
@@ -351,6 +366,7 @@ rules:
   then:
     rate_bps: 0
     narrate: 'Exempt: telephone charges and airline tickets.'
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.rate.winnings.resident
   when:
     payment_type: winnings
@@ -388,6 +404,7 @@ rules:
   then:
     rate_bps: 0
     narrate: 'Exempt: LPG, CNG and renewable energy equipment.'
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4"
 - id: wht.remittance.deadline-company
   when:
     payer: company
@@ -402,6 +419,7 @@ rules:
   then:
     deadline_day_of_month: 30
     narrate: WHT deducted on individuals remitted to the relevant State IRS by the 30th day of the following month.
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 6"
 - id: wht.credit.receipt
   when:
     deducted: true
@@ -409,7 +427,8 @@ rules:
     decision: issue_credit_note
     narrate: Deducting agent must issue a WHT credit note/receipt; WHT credit is available to the beneficiary against its
       tax liability.
+  citation: "Deduction of Tax at Source (Withholding) Regulations 2024, reg. 7"
 signed:
   algorithm: ed25519
   key_id: governance-board-2026
-  signature: 0e99c9cdaef4972bab9fd1294338d39e2e3737231568009a09549b32bfb03bdf4a909f7fdde18e683de7336f3e53ce26033e1113aeacfaf9b48a755c8da62e0c
+  signature: cb41407484ddb424b66a258c8b29209e996a759b6af030f9a11f6c8a5169c0291c505cc43a0bfcfedcfe6644bea018bf29d4a1200ea19627eecb97895421980c
