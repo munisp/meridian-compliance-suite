@@ -116,7 +116,7 @@ func (inv *CanonicalInvoice) Normalise() {
 		if l.LineTotalKobo == 0 && l.QuantityMilli != 0 {
 			l.LineTotalKobo = l.QuantityMilli * l.UnitPriceKobo / 1000
 		}
-		l.VatAmountKobo = l.LineTotalKobo * l.VatRateBps / 10000
+		l.VatAmountKobo = RoundBpsHalfUp(l.LineTotalKobo, l.VatRateBps)
 		excl += l.LineTotalKobo
 		tax += l.VatAmountKobo
 	}
