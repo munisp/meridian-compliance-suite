@@ -16,16 +16,36 @@ Legacy request aliases (goods, contract, service_fee, director_fee) are mapped
 to the canonical vocabulary for backward compatibility.
 Money is integer kobo only. Tax amounts use round-half-up per
 rp-mbs-business-rules (mbs.vat.arithmetic round()).
+
+New pack semantics (meridian-rule-packs feature/tax-law-parity, audit
+2026-07-31 findings T3/T4/T7 + gap #14) honored by evaluate_rules():
+  * precedence (rule-level or then.precedence): higher precedence wins on
+    multi-match — a generic non-resident rule can no longer clobber the
+    royalty non-resident-individual 5% rate (finding #7);
+  * `not_in` operator in when-conditions (map form and key__not_in suffix) —
+    scopes the no-TIN double rate to active income (finding #9);
+  * `tax:` when-discriminator — CIT / Development Levy / TET-style rules only
+    fire for their own tax and cannot clobber each other's computed fields;
+  * date-aware rule dispatch: rule effective_from/effective_to are matched
+    against the transaction date (earlier of payment/settlement), fixing the
+    date-blind engine (gap #14) — 2025-dated facts hit legacy rules,
+    2026-dated hit NTA rules, winnings are unrated before 2024-10-01 and
+    5%/15% from 2024-10-01.
+Small-company carve-out (finding #8) is enforced engine-side: it is NEVER
+granted without a present, valid supplier TIN; the payer-small and
+<= N2m/month conditions are evaluated as pack when-facts.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
-from meridian_py.rulepack import PackRegistry
+from meridian_py.rulepack import Pack, PackRegistry
+from meridian_py.rulepack import _match_cond as _shared_match_cond
 
 TIN_GRAPH_URL = os.environ.get("TIN_GRAPH_URL", "").rstrip("/")
 
@@ -53,6 +73,94 @@ KNOWN_PAYMENT_TYPES = {
 def round_half_up_kobo(amount_kobo: int, rate_bps: int) -> int:
     """amount * rate_bps / 10000 with round-half-up (pack-mandated round())."""
     return (amount_kobo * rate_bps + 5000) // 10_000
+
+
+# ------------------------------------------------------------------ new pack semantics
+# Mirrors the reference matcher in meridian-rule-packs tests/test_taxlaw_parity.py
+# (branch feature/tax-law-parity):
+#   * `not_in` operator in `when` condition maps (and `key__not_in` suffix)
+#   * rule-level `effective_from` / `effective_to` date dispatch on the
+#     transaction date (gap #14: the engine was date-blind)
+#   * `precedence` (rule-level or `then.precedence`): on multi-match the higher
+#     precedence rule wins; ties keep pack file order (last-match-wins)
+#   * `tax:` when-discriminator: rules keyed `when.tax: CIT|DEV_LEVY|TET|...`
+#     only fire when the context carries that tax, so levy/CIT-style rules can
+#     never clobber each other's (or WHT's) computed fields.
+
+
+def _match_cond(key: str, want: Any, ctx: dict) -> tuple[bool, str]:
+    """Shared matcher + `not_in` extension (map form and __not_in suffix)."""
+    if key.endswith("__not_in"):
+        base = key[: -len("__not_in")]
+        got = ctx.get(base)
+        ok = not any(str(item) == str(got) for item in (want or []))
+        return ok, "" if ok else f"{base}={got} in {want}"
+    if isinstance(want, dict) and "not_in" in want:
+        got = ctx.get(key)
+        if any(str(item) == str(got) for item in (want.get("not_in") or [])):
+            return False, f"{key}={got} in {want['not_in']}"
+        rest = {k: v for k, v in want.items() if k != "not_in"}
+        if rest:
+            return _shared_match_cond(key, rest, ctx)
+        return True, ""
+    return _shared_match_cond(key, want, ctx)
+
+
+def _rule_active(rule: dict, as_of: str | None) -> bool:
+    """Rule-level effective-date dispatch (ISO dates compare lexicographically).
+    Rules without windows are always active; a request without a date activates
+    all windows (backward compatible)."""
+    if not as_of:
+        return True
+    ef, et = rule.get("effective_from"), rule.get("effective_to")
+    if ef and as_of < str(ef):
+        return False
+    if et and as_of > str(et):
+        return False
+    return True
+
+
+def _rule_precedence(rule: dict) -> int:
+    if rule.get("precedence") is not None:
+        return int(rule["precedence"])
+    return int((rule.get("then") or {}).get("precedence", 0) or 0)
+
+
+def evaluate_rules(pack: Pack, ctx: dict, as_of: str | None = None) -> dict:
+    """Evaluate pack rules over ctx with date dispatch + precedence merge.
+
+    Matched rules are applied in ascending (precedence, file order), so the
+    highest-precedence matching rule wins each decision field on multi-match.
+    """
+    scored: list[tuple[int, int, dict]] = []
+    trace: list[dict] = []
+    for idx, rule in enumerate(pack.rules):
+        rid = rule.get("id")
+        prec = _rule_precedence(rule)
+        if not _rule_active(rule, as_of):
+            trace.append({"rule_id": rid, "matched": False, "precedence": prec,
+                          "reason": f"inactive at {as_of} (effective "
+                                    f"{rule.get('effective_from')}.."
+                                    f"{rule.get('effective_to')})",
+                          "skipped": "effective-window"})
+            continue
+        matched, why = True, ""
+        for k, want in (rule.get("when") or {}).items():
+            ok, why = _match_cond(k, want, ctx)
+            if not ok:
+                matched = False
+                break
+        trace.append({"rule_id": rid, "matched": matched, "precedence": prec,
+                      "reason": "" if matched else why})
+        if matched:
+            scored.append((prec, idx, rule))
+    scored.sort(key=lambda t: (t[0], t[1]))
+    decision: dict[str, Any] = {}
+    for _, _, rule in scored:
+        decision.update({k: v for k, v in (rule.get("then") or {}).items()
+                         if k != "precedence"})
+    return {"pack": pack.ref, "decision": decision, "trace": trace,
+            "matched": [r.get("id") for _, _, r in scored]}
 
 
 @dataclass
@@ -106,8 +214,19 @@ def build_context(req: dict) -> dict:
         ctx["supplier_tin"] = tin
     if nin:
         ctx["supplier_nin"] = nin
-    # Small-company carve-out needs the supplier's MONTHLY turnover and size —
-    # never proxied from the single payment amount (audit fix: over-exemption).
+    # Small-company carve-out (WHT Regs 2024 reg. 4, audit finding #8): the
+    # relief belongs to the small-company PAYER (<= N25m p.a.), for transaction
+    # values <= N2m in the calendar month, and only with a supplier TIN.
+    if req.get("payer_size"):
+        ctx["payer_size"] = req["payer_size"]
+    elif req.get("payer_is_small_company"):
+        ctx["payer_size"] = "small"
+    if req.get("payer_annual_turnover_kobo") is not None:
+        ctx["payer_annual_turnover_kobo"] = int(req["payer_annual_turnover_kobo"])
+    if req.get("transaction_month_value_kobo") is not None:
+        ctx["transaction_month_value_kobo"] = int(req["transaction_month_value_kobo"])
+    # Legacy supplier-side facts are still forwarded (older pack versions keyed
+    # the carve-out on them) but the engine gate no longer honours them alone.
     if req.get("supplier_monthly_turnover_kobo") is not None:
         ctx["supplier_monthly_turnover_kobo"] = int(req["supplier_monthly_turnover_kobo"])
     if req.get("supplier_size"):
@@ -125,6 +244,13 @@ def build_context(req: dict) -> dict:
         ctx["goods_origin"] = "imported"
     if req.get("franked_investment_income"):
         ctx["franked_investment_income"] = True
+    if req.get("source"):
+        ctx["source"] = req["source"]  # winnings: lottery | gaming | reality_show
+    if req.get("construction_type"):
+        ctx["construction_type"] = req["construction_type"]
+    # `tax` when-discriminator (E3): keeps CIT/Dev-Levy/TET-style rules from
+    # clobbering each other's computed fields; WHT requests default to WHT.
+    ctx["tax"] = req.get("tax") or "WHT"
     # Deduction timing: earlier of payment or settlement (Reg 3)
     if payment_date and settlement_date:
         ctx["payment_event"] = "payment" if payment_date <= settlement_date else "settlement"
@@ -132,11 +258,22 @@ def build_context(req: dict) -> dict:
         ctx["payment_event"] = "payment"
     elif settlement_date:
         ctx["payment_event"] = "settlement"
+    # Transaction date fact: drives rule effective-window dispatch (E4) and
+    # `when.date` conditions (e.g. rp-cit-legacy date-gated legacy rates).
+    dates = [d for d in (payment_date, settlement_date,
+                       req.get("date") or req.get("transaction_date")) if d]
+    if dates:
+        ctx["date"] = min(dates)
     return ctx
 
 
-def evaluate_wht(req: dict) -> dict:
-    """Evaluate a deduction request end-to-end."""
+def evaluate_wht(req: dict, pack: Pack | None = None,
+                 registry: PackRegistry | None = None) -> dict:
+    """Evaluate a deduction request end-to-end.
+
+    `pack`/`registry` are injectable for tests (e.g. loading the canonical
+    packs from the meridian-rule-packs checkout via RP_PACKS_DIR).
+    """
     amount = int(req.get("amount_kobo") or 0)
     if amount <= 0:
         raise ValueError("amount_kobo must be > 0")
@@ -145,9 +282,34 @@ def evaluate_wht(req: dict) -> dict:
         raise ValueError(
             f"unknown payment_type {req.get('payment_type')!r} "
             f"(canonical: {sorted(KNOWN_PAYMENT_TYPES)})")
-    result = _registry.evaluate("rp-wht-2024", ctx)
+    as_of = ctx.get("date")  # transaction date -> rule effective-window dispatch
+    via = "embedded-pack"
+    if pack is None and registry is None and os.environ.get("RULES_ENGINE_URL"):
+        # Deployment path: core rules-engine (Go) evaluates remotely.
+        result = (registry or _registry).evaluate("rp-wht-2024", ctx)
+        via = result.get("via", "rules-engine")
+        matched = [t["rule_id"] for t in result["trace"] if t.get("matched")]
+    else:
+        pack = pack or (registry or _registry).load("rp-wht-2024")
+        tin0 = ctx.get("supplier_tin", "")
+        tin0_valid = validate_tin(tin0).valid if tin0 else False
+        rules = pack.rules
+        if not tin0_valid and any(r.get("id") == "wht.small-co.carveout"
+                                  for r in rules):
+            # E5 engine-side enforcement (audit finding #8): the small-company
+            # carve-out is NEVER granted without a present, valid supplier TIN —
+            # drop the rule before matching so the normal rate applies.
+            rules = [r for r in rules if r.get("id") != "wht.small-co.carveout"]
+        if rules is not pack.rules:
+            pack = Pack(id=pack.id, version=pack.version,
+                        effective_from=pack.effective_from,
+                        effective_to=pack.effective_to, status=pack.status,
+                        subject_to_regazette=pack.subject_to_regazette,
+                        provenance=pack.provenance, signed=pack.signed,
+                        rules=rules, raw=pack.raw)
+        result = evaluate_rules(pack, ctx, as_of=as_of)
+        matched = result["matched"]
     dec = result["decision"]
-    matched = [t["rule_id"] for t in result["trace"] if t["matched"]]
 
     tin = ctx.get("supplier_tin", "")
     tin_check = validate_tin(tin) if tin else TINCheck("", False, "local-validator",
@@ -155,8 +317,10 @@ def evaluate_wht(req: dict) -> dict:
     identity_ok = bool(tin or (ctx["beneficiary"] == "individual" and ctx.get("supplier_nin")))
 
     # Decision assembly from the merged pack decision + matched rule ids.
+    rate_rule_matched = "rate_bps" in dec
     base_rate = int(dec.get("rate_bps") or 0)
     rate = base_rate
+    # The carve-out rule only survives evaluation with a valid TIN (E5).
     carveout = "wht.small-co.carveout" in matched
     exempt = carveout or any(m.startswith("wht.exempt.") for m in matched)
     doubled = False
@@ -167,17 +331,19 @@ def evaluate_wht(req: dict) -> dict:
         doubled = True
     outcome = ("small_company_carveout" if carveout else
                "exempt" if exempt else
-               "deduct_no_tin_double" if doubled else "deduct")
+               "deduct_no_tin_double" if doubled else
+               "deduct" if rate_rule_matched else "no_applicable_rule")
 
     wht_kobo = round_half_up_kobo(amount, rate)
     # Deduction date: earlier of payment / settlement (Reg 3)
     dates = [d for d in (req.get("payment_date"), req.get("settlement_date")) if d]
-    trigger_date = min(dates) if dates else ""
+    trigger_date = min(dates) if dates else (ctx.get("date") or "")
     trigger = ctx.get("payment_event", "")
 
     return {
         "pack": result["pack"], "via": result.get("via", "embedded-pack"),
         "subject_to_regazette": True,
+        "as_of_date": as_of or "",
         "amount_kobo": amount,
         "rate_bps": rate,
         "base_rate_bps": base_rate,
