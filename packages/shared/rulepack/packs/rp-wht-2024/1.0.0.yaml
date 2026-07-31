@@ -1,102 +1,287 @@
+# rp-wht-2024 v1.0.0 — Meridian rule pack (SPEC §1.4 format)
+# Deduction of Tax at Source (Withholding) Regulations 2024
 id: rp-wht-2024
 version: 1.0.0
-effective_from: 2025-01-01
+title: Deduction of Tax at Source (Withholding) Regulations 2024
+description: 'Full WHT rule set: rates per payment type and beneficiary class, deduction timing (earlier of payment or settlement),
+  no-TIN double rate, small-company carve-out, NIN-acceptable identity, exemptions (direct debit, broker, imported/manufactured
+  goods, franked investment income), remittance deadline.'
+effective_from: '2025-01-01'
 effective_to: null
 status: published
 subject_to_regazette: true
 provenance:
-  as_passed: "Deduction of Tax at Source (Withholding) Regulations 2024 — rates, timing, exemptions"
-  as_gazetted: "Federal Republic of Nigeria Official Gazette, 2024"
-  source_citation: "Deduction of Tax at Source (Withholding) Regulations 2024"
-signed: { algorithm: ed25519, key_id: governance-board-2026, signature: "DEV-UNSIGNED" }
+  as_passed: Deduction of Tax at Source (Withholding) Regulations 2024, signed 1 July 2024 (FIRS/FMoF)
+  as_gazetted: Federal Republic of Nigeria Official Gazette No. 106, Vol. 111 of 2024 (awaiting CTC confirmation)
+  source_citation: Deduction of Tax at Source (Withholding) Regulations 2024
+parameters:
+  small_company_monthly_turnover_cap_kobo: 200000000
+  no_tin_multiplier_bps: 20000
 rules:
-  # --- Timing: deduction at the EARLIER of payment or settlement (Reg. 3) ---
-  - id: wht.trigger.payment_first
-    when: { payment_date__exists: true, settlement_date__exists: true, payment_before_settlement: true }
-    then: { deduction_trigger: payment, narrate: "Deduct at earlier of payment or settlement: payment occurred first (Reg 3(1))" }
-  - id: wht.trigger.settlement_first
-    when: { payment_date__exists: true, settlement_date__exists: true, payment_before_settlement: false }
-    then: { deduction_trigger: settlement, narrate: "Deduct at earlier of payment or settlement: settlement occurred first (Reg 3(1))" }
-  - id: wht.trigger.payment_only
-    when: { payment_date__exists: true, settlement_date__exists: false }
-    then: { deduction_trigger: payment, narrate: "Deduction triggered on payment (Reg 3(1))" }
-  - id: wht.trigger.settlement_only
-    when: { payment_date__exists: false, settlement_date__exists: true }
-    then: { deduction_trigger: settlement, narrate: "Deduction triggered when amount is settled/recognised (Reg 3(1))" }
-  # --- Base rates: companies vs individuals (First Schedule) ---
-  - id: wht.rate.goods.company
-    when: { payment_type: goods, beneficiary: company }
-    then: { rate_bps: 200, narrate: "WHT 2% on goods supplied to companies" }
-  - id: wht.rate.goods.individual
-    when: { payment_type: goods, beneficiary: individual }
-    then: { rate_bps: 500, narrate: "WHT 5% on goods supplied by individuals" }
-  - id: wht.rate.services.company
-    when: { payment_type: services, beneficiary: company }
-    then: { rate_bps: 200, narrate: "WHT 2% on services for companies (2024 Regs reduced from 5%)" }
-  - id: wht.rate.services.individual
-    when: { payment_type: services, beneficiary: individual }
-    then: { rate_bps: 500, narrate: "WHT 5% on services by individuals" }
-  - id: wht.rate.contract.company
-    when: { payment_type: contract, beneficiary: company }
-    then: { rate_bps: 200, narrate: "WHT 2% on contracts (all aspects of building/construction/supply), companies" }
-  - id: wht.rate.contract.individual
-    when: { payment_type: contract, beneficiary: individual }
-    then: { rate_bps: 500, narrate: "WHT 5% on contracts, individuals" }
-  - id: wht.rate.dividend
-    when: { payment_type: dividend }
-    then: { rate_bps: 1000, narrate: "WHT 10% on dividends" }
-  - id: wht.rate.interest
-    when: { payment_type: interest }
-    then: { rate_bps: 1000, narrate: "WHT 10% on interest" }
-  - id: wht.rate.rent.company
-    when: { payment_type: rent, beneficiary: company }
-    then: { rate_bps: 1000, narrate: "WHT 10% on rent (companies)" }
-  - id: wht.rate.rent.individual
-    when: { payment_type: rent, beneficiary: individual }
-    then: { rate_bps: 1000, narrate: "WHT 10% on rent (individuals)" }
-  - id: wht.rate.royalty.company
-    when: { payment_type: royalty, beneficiary: company }
-    then: { rate_bps: 500, narrate: "WHT 5% on royalties (companies, 2024 Regs)" }
-  - id: wht.rate.royalty.individual
-    when: { payment_type: royalty, beneficiary: individual }
-    then: { rate_bps: 1000, narrate: "WHT 10% on royalties (individuals)" }
-  - id: wht.rate.commission.company
-    when: { payment_type: commission, beneficiary: company }
-    then: { rate_bps: 200, narrate: "WHT 2% on commission/consultancy/professional fees (companies)" }
-  - id: wht.rate.commission.individual
-    when: { payment_type: commission, beneficiary: individual }
-    then: { rate_bps: 500, narrate: "WHT 5% on commission/consultancy/professional fees (individuals)" }
-  # --- No-TIN double rate (Reg 8(2)) ---
-  - id: wht.identity.nin_acceptable
-    when: { beneficiary: individual, has_nin: true, has_tin: false }
-    then: { identity_ok: true, narrate: "NIN acceptable in place of TIN for individuals (Reg 8(4))" }
-  - id: wht.identity.tin_ok
-    when: { has_tin: true }
-    then: { identity_ok: true, narrate: "Valid TIN presented" }
-  - id: wht.no_tin.double
-    when: { has_tin: false, has_nin: false, identity_ok: false }
-    then: { rate_multiplier: 2, violation: "Reg 8(2): rate doubled where recipient has no TIN (and no NIN for individuals)", severity: fatal }
-  # --- Small company carve-out: <= N2m monthly to suppliers with valid TIN (Reg 5) ---
-  - id: wht.smallco.exempt
-    when: { monthly_amount_kobo__lte: 200000000, has_tin: true }
-    then: { small_company_carveout: true, rate_bps: 0, narrate: "Reg 5: transactions <= N2,000,000/month with valid-TIN supplier exempt from deduction" }
-  # --- Exemptions (Reg 4) ---
-  - id: wht.exempt.direct_debit
-    when: { via_direct_debit: true }
-    then: { exempt: true, rate_bps: 0, narrate: "Reg 4: payment by direct debit from bank account of the payer is exempt from deduction" }
-  - id: wht.exempt.broker
-    when: { via_broker: true }
-    then: { exempt: true, rate_bps: 0, narrate: "Reg 4: transactions through registered brokers/dealers exempt" }
-  - id: wht.exempt.manufacturer_materials
-    when: { payment_type: goods, supplier_is_manufacturer: true }
-    then: { exempt: true, rate_bps: 0, narrate: "Reg 4: sale of goods by manufacturer/producer exempt" }
-  - id: wht.exempt.imported
-    when: { goods_imported: true }
-    then: { exempt: true, rate_bps: 0, narrate: "Reg 4: imported goods where payment made via letter of credit etc." }
-  # --- Remittance deadline ---
-  - id: wht.remit.deadline.company
-    when: { beneficiary: company }
-    then: { remit_deadline_day: 21, narrate: "Remit to NRS by 21st day of the month following deduction (CITA)" }
-  - id: wht.remit.deadline.individual
-    when: { beneficiary: individual }
-    then: { remit_deadline_day: 30, narrate: "Remit to State IRS by 30th day of the month following deduction (PITA)" }
+- id: wht.trigger.due-date
+  when:
+    payment_event:
+      in:
+      - payment
+      - settlement
+      - credit_to_account
+  then:
+    decision: deduct_at_earlier_of_payment_or_settlement
+    narrate: Deduction arises on the earlier of when payment is made or the amount due is settled, credited, or otherwise
+      dealt with.
+  citation: WHT Regs 2024, reg. 3
+- id: wht.rate.dividend.company
+  when:
+    payment_type: dividend
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on dividends to a company
+- id: wht.rate.dividend.individual
+  when:
+    payment_type: dividend
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on dividends to an individual
+- id: wht.rate.interest.company
+  when:
+    payment_type: interest
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on interest to a company
+- id: wht.rate.interest.individual
+  when:
+    payment_type: interest
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on interest to an individual
+- id: wht.rate.rent.company
+  when:
+    payment_type: rent
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on rent to a company
+- id: wht.rate.rent.individual
+  when:
+    payment_type: rent
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on rent to an individual
+- id: wht.rate.royalty.company
+  when:
+    payment_type: royalty
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on royalties to a company
+- id: wht.rate.royalty.individual
+  when:
+    payment_type: royalty
+    beneficiary: individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on royalties to an individual
+- id: wht.rate.goods-supply.any
+  when:
+    payment_type: supply_of_goods_materials
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 200
+    narrate: WHT 2% on supply of goods and materials
+- id: wht.rate.construction.any
+  when:
+    payment_type: construction
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 200
+    narrate: WHT 2% on building/construction contracts
+- id: wht.rate.services.company
+  when:
+    payment_type:
+      in:
+      - consultancy
+      - professional
+      - technical
+      - management
+      - services
+    beneficiary: company
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on services to a company
+- id: wht.rate.services.individual
+  when:
+    payment_type:
+      in:
+      - consultancy
+      - professional
+      - technical
+      - management
+      - services
+    beneficiary: individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on services to an individual
+- id: wht.rate.commission.any
+  when:
+    payment_type: commission
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on commission
+- id: wht.rate.directors-fees.individual
+  when:
+    payment_type: directors_fees
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on directors' fees (individual)
+- id: wht.rate.non-resident.standard
+  when:
+    beneficiary_residence: non_resident
+    payment_type:
+      in:
+      - dividend
+      - interest
+      - rent
+      - royalty
+      - consultancy
+      - professional
+      - technical
+      - management
+      - services
+      - commission
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on payments to non-resident recipients (final tax; treaty relief may reduce)
+  citation: WHT Regs 2024, First Schedule
+- id: wht.no-tin.double-rate
+  when:
+    supplier_tin: null
+    supplier_nin: null
+  then:
+    rate_multiplier_bps: 20000
+    narrate: Rate is DOUBLED where the supplier has no TIN (and no NIN for individuals).
+  citation: WHT Regs 2024, reg. 5
+- id: wht.identity.nin-acceptable
+  when:
+    beneficiary: individual
+    supplier_nin:
+      present: true
+  then:
+    decision: identity_satisfied
+    narrate: NIN is acceptable in lieu of TIN as supplier identity for individuals.
+  citation: WHT Regs 2024, reg. 5(2)
+- id: wht.small-co.carveout
+  when:
+    beneficiary: company
+    supplier_size: small
+    supplier_monthly_turnover_kobo:
+      lte: 200000000
+  then:
+    rate_bps: 0
+    narrate: No deduction on payments to a small company whose turnover is not more than N2,000,000 in the month of payment.
+  citation: WHT Regs 2024, reg. 4
+- id: wht.exempt.franked-investment-income
+  when:
+    payment_type: dividend
+    franked_investment_income: true
+  then:
+    rate_bps: 0
+    narrate: No WHT on franked investment income redistributed.
+- id: wht.exempt.direct-debit
+  when:
+    payment_channel: direct_debit
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: payments made by direct debit from the payer''s bank account.'
+- id: wht.exempt.broker-securities
+  when:
+    payment_channel: broker
+    instrument: securities
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: securities transactions settled through a broker/dealer.'
+- id: wht.exempt.imported-goods
+  when:
+    payment_type: supply_of_goods_materials
+    goods_origin: imported
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: imported goods where the margin does not represent services performed in Nigeria.'
+- id: wht.exempt.manufactured-goods
+  when:
+    payment_type: supply_of_goods_materials
+    supplier_role: manufacturer_or_producer
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: goods manufactured or produced by the supplier.'
+- id: wht.exempt.telephone-airline
+  when:
+    payment_type:
+      in:
+      - telephone_charges
+      - airline_ticket
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: telephone charges and airline tickets.'
+- id: wht.exempt.winnings
+  when:
+    payment_type: winnings
+    source:
+      in:
+      - lottery
+      - gaming
+      - reality_show
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: winnings from lotteries/gaming (taxed under dedicated regimes).'
+- id: wht.exempt.lpg-cng
+  when:
+    payment_type: supply_of_goods_materials
+    goods:
+      in:
+      - lpg
+      - cng
+      - renewable_energy_equipment
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: LPG, CNG and renewable energy equipment.'
+- id: wht.remittance.deadline-company
+  when:
+    payer: company
+    tax_authority: NRS
+  then:
+    deadline_day_of_month: 21
+    narrate: WHT deducted on corporate beneficiaries must be remitted to NRS by the 21st day of the following month.
+  citation: WHT Regs 2024, reg. 6
+- id: wht.remittance.deadline-individual
+  when:
+    tax_authority: SIRS
+  then:
+    deadline_day_of_month: 30
+    narrate: WHT deducted on individuals remitted to the relevant State IRS by the 30th day of the following month.
+- id: wht.credit.receipt
+  when:
+    deducted: true
+  then:
+    decision: issue_credit_note
+    narrate: Deducting agent must issue a WHT credit note/receipt; WHT credit is available to the beneficiary against its
+      tax liability.
+signed:
+  algorithm: ed25519
+  key_id: governance-board-2026
+  signature: 439eecf3def8eb248fbb82f8b1b24775158b08ab57ca6600cc87b48e7abdde4c77fdb0c0c2a0ef1d8bbc88e73c247420ab5675addb3a7ca0bcad2e88f1e94605
