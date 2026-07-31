@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/munisp/meridian-compliance-suite/packages/shared/envelope"
+	"github.com/munisp/meridian-compliance-suite/packages/shared/rulepack"
 )
 
 // Party is a buyer or supplier on the canonical invoice (SPEC §3 T1).
@@ -34,6 +35,9 @@ type InvoiceLine struct {
 	VatCategory   string `json:"vat_category"`    // S=standard 7.5%, Z=zero, E=exempt
 	VatRateBps    int64  `json:"vat_rate_bps"`    // 750 = 7.5%
 	VatAmountKobo int64  `json:"vat_amount_kobo"`
+	// Citations: LCE SPEC §5 statute citation for the computed VAT amount
+	// (additive response-layer field, omitempty).
+	Citations []rulepack.Citation `json:"citations,omitempty"`
 }
 
 // CryptoStamp is the MBS cryptographic stamp returned with the IRN.
@@ -169,6 +173,9 @@ func (inv *CanonicalInvoice) Normalise() {
 	if inv.TaxKobo == 0 {
 		inv.TaxKobo = tax
 	}
+	// LCE SPEC §5: annotate each line's computed VAT with its statute
+	// citation (lookup over vat_category; no computation change).
+	attachCitations(inv)
 	if inv.PayableKobo == 0 {
 		inv.PayableKobo = inv.TaxExclusiveKobo + inv.TaxKobo
 	}
