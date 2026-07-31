@@ -14,10 +14,22 @@ export default function Einvoicing() {
     e.preventDefault()
     setSubmitting(true); setError(null)
     try {
+      // Canonical REST payload — must match CanonicalInvoice JSON exactly
+      // (contract test: services/einvoicing TestPortalPayloadContract).
+      const amountKobo = Math.round(parseFloat(form.amount) * 100)
+      const today = new Date().toISOString().slice(0, 10)
       const res = await api('einvoicing').post('/v1/invoices', {
-        supplier_tin: form.supplier_tin, buyer_tin: form.buyer_tin,
-        lines: [{ description: 'Consulting services', qty: 1, unit_price_kobo: Math.round(parseFloat(form.amount) * 100) }],
+        invoice_number: `WEB-${Date.now()}`,
+        invoice_type: 'B2B',
+        issue_date: today,
         currency: form.currency,
+        supplier: { tin: form.supplier_tin, name: `Supplier ${form.supplier_tin}`, country: 'NG' },
+        customer: { tin: form.buyer_tin, name: `Buyer ${form.buyer_tin}`, country: 'NG' },
+        lines: [{
+          id: '1', description: 'Consulting services',
+          quantity_milli: 1000, unit_price_kobo: amountKobo,
+          vat_category: 'S', vat_rate_bps: 750,
+        }],
       })
       setInvoice(res.data)
       // request pre-clearance (IRN + crypto stamp)
@@ -26,6 +38,10 @@ export default function Einvoicing() {
         try {
           const pc = await api('einvoicing').post(`/v1/invoices/${id}/preclear`, {})
           setInvoice((inv: any) => ({ ...inv, preclear: pc.data }))
+          try {
+            const qr = await api('einvoicing').get(`/v1/invoices/${id}/qr`)
+            setInvoice((inv: any) => ({ ...inv, qr: qr.data }))
+          } catch { /* QR optional until cleared */ }
         } catch { /* pre-clearance optional in dev */ }
       }
     } catch (err) { setError(err) } finally { setSubmitting(false) }
@@ -66,6 +82,13 @@ export default function Einvoicing() {
               <Row k="IRN" v={invoice.preclear?.irn || invoice.irn || 'pending'} mono />
               <Row k="Crypto stamp" v={invoice.preclear?.crypto_stamp || invoice.crypto_stamp || 'pending'} mono />
               <Row k="Rule pack" v={invoice.rule_pack_version || invoice.invoice?.rule_pack_version} />
+              {invoice.qr?.qr_svg && (
+                <div className="pt-2">
+                  <span className="text-sand-500 text-xs">Verification QR (IRN + HMAC)</span>
+                  <div className="mt-1 w-36" dangerouslySetInnerHTML={{ __html: invoice.qr.qr_svg }} />
+                  <div className="font-mono text-[10px] break-all text-sand-400 mt-1">{invoice.qr.payload}</div>
+                </div>
+              )}
             </div>
           ) : <Empty>No invoice submitted yet — IRN and crypto stamp appear here after pre-clearance.</Empty>}
         </Card>
