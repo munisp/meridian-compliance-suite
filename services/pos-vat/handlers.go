@@ -12,8 +12,17 @@ import (
 // IngestRequest wraps a POS receipt with ingest options.
 type IngestRequest struct {
 	Receipt
-	StoreAndForward bool `json:"store_and_forward,omitempty"` // offline terminal batch
+	StoreAndForward bool   `json:"store_and_forward,omitempty"` // offline terminal batch
 	SpoolReason     string `json:"spool_reason,omitempty"`
+}
+
+// roundBpsHalfUp computes amount*rateBps/10000 with round-half-up, matching the
+// pack-mandated round() in rp-mbs-business-rules (mbs.vat.arithmetic).
+func roundBpsHalfUp(amountKobo, rateBps int64) int64 {
+	if amountKobo >= 0 {
+		return (amountKobo*rateBps + 5000) / 10000
+	}
+	return -((-amountKobo*rateBps + 5000) / 10000)
 }
 
 func (s *Service) handleIngestReceipt(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +106,7 @@ func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 		rc.Baskets[basket] += amount
 		total += amount
 		if basket == "standard_75" {
-			vat += amount * rate / 10000
+			vat += roundBpsHalfUp(amount, rate)
 		}
 	}
 	rc.TotalKobo = total
@@ -120,8 +129,8 @@ func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 
 func computeAttribution(vat int64, state string, acfg AttributionConfig) AttributionResult {
 	res := AttributionResult{Mode: acfg.Mode, State: state}
-	federal := vat * acfg.FederalShareBPS / 10000
-	stateShare := vat * acfg.StateShareBPS / 10000
+	federal := roundBpsHalfUp(vat, acfg.FederalShareBPS)
+	stateShare := roundBpsHalfUp(vat, acfg.StateShareBPS)
 	switch acfg.Mode {
 	case "federal":
 		res.FederalKobo = vat
@@ -266,7 +275,7 @@ func (s *Service) handleVariance(w http.ResponseWriter, r *http.Request) {
 	rows := []varianceRow{}
 	rate := s.packs.StandardRateBPS()
 	for _, rc := range s.store.ListReceipts(tenant, "", 0) {
-		recompute := rc.Baskets["standard_75"] * rate / 10000
+		recompute := roundBpsHalfUp(rc.Baskets["standard_75"], rate)
 		if delta := rc.VATKobo - recompute; delta < -1 || delta > 1 {
 			rows = append(rows, varianceRow{rc.ID, "vat-recompute-drift", recompute, rc.VATKobo, delta,
 				"computed VAT diverges from basket recompute beyond rounding tolerance"})
