@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- NRS submission status list (error queue) -->
+    <record id="view_nrs_submission_log_list" model="ir.ui.view">
+        <field name="name">nrs.submission.log.list</field>
+        <field name="model">nrs.submission.log</field>
+        <field name="arch" type="xml">
+            <list decoration-danger="state == 'error'"
+                  decoration-success="state == 'sent'">
+                <field name="create_date"/>
+                <field name="move_id"/>
+                <field name="irn"/>
+                <field name="state"/>
+                <field name="attempts"/>
+                <field name="next_retry"/>
+                <field name="event"/>
+                <field name="last_error"/>
+                <button name="action_retry_now" type="object"
+                        string="Retry" invisible="state != 'error'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_nrs_submission_log_form" model="ir.ui.view">
+        <field name="name">nrs.submission.log.form</field>
+        <field name="model">nrs.submission.log</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_retry_now" type="object"
+                            string="Retry Now" invisible="state != 'error'"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="move_id" readonly="1"/>
+                            <field name="irn" readonly="1"/>
+                            <field name="state" readonly="1"/>
+                            <field name="attempts" readonly="1"/>
+                            <field name="next_retry" readonly="1"/>
+                            <field name="event" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="last_error" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Payload">
+                        <field name="payload" readonly="1" widget="text"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_nrs_submission_log" model="ir.actions.act_window">
+        <field name="name">NRS Submission Log</field>
+        <field name="res_model">nrs.submission.log</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('state', '!=', 'sent')]</field>
+    </record>
+
+    <menuitem id="menu_nrs_submission_log"
+              name="NRS Submission Queue"
+              parent="account.menu_finance_receivables"
+              action="action_nrs_submission_log"
+              sequence="90"/>
+</odoo>
