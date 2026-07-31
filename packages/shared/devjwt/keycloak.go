@@ -26,14 +26,17 @@ func claimsFromAuthx(c authx.Claims) Claims {
 // MiddlewareEnv so existing call sites gain keycloak support automatically.
 func MiddlewareEnv(next http.Handler) http.Handler {
 	if os.Getenv("AUTH_MODE") == "keycloak" {
-		if v := authx.KeycloakVerifierFromEnv(); v != nil {
-			log.Printf("profile=prod component=auth (keycloak issuer=%s)", v.Issuer)
-			return keycloakMiddleware(next, v)
+		// FAIL CLOSED (audit fix): a keycloak deployment with missing
+		// configuration must refuse to boot rather than silently run dev auth
+		// (hardcoded HS256 secret / X-Dev-Role header) in production.
+		v := authx.KeycloakVerifierFromEnv()
+		if v == nil {
+			log.Fatal("AUTH_MODE=keycloak but KEYCLOAK_ISSUER/JWKS configuration is incomplete; refusing to start (no dev fallback)")
 		}
-		log.Printf("profile=dev component=auth (AUTH_MODE=keycloak but KEYCLOAK_ISSUER unset)")
-	} else {
-		log.Printf("profile=dev component=auth")
+		log.Printf("profile=prod component=auth (keycloak issuer=%s)", v.Issuer)
+		return keycloakMiddleware(next, v)
 	}
+	log.Printf("profile=dev component=auth")
 	return devMiddleware(next)
 }
 
