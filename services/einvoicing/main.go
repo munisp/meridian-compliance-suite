@@ -218,7 +218,7 @@ func (s *Server) handleGetInvoice(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
 		return
 	}
-	if claims, cerr := devjwt.FromContext(r); cerr == nil && claims.TenantID != "" &&
+	if claims, ok := devjwt.FromContext(r); ok && claims.TenantID != "" &&
 		inv.TenantID != "" && inv.TenantID != claims.TenantID {
 		// tenant isolation: never reveal existence across tenants (audit fix)
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
@@ -245,7 +245,7 @@ func (s *Server) handleGetQR(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
 		return
 	}
-	if claims, cerr := devjwt.FromContext(r); cerr == nil && claims.TenantID != "" &&
+	if claims, ok := devjwt.FromContext(r); ok && claims.TenantID != "" &&
 		inv.TenantID != "" && inv.TenantID != claims.TenantID {
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
 		return
