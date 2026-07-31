@@ -18,4 +18,6 @@ require (
 	golang.org/x/text v0.15.0 // indirect
 )
 
+require gopkg.in/yaml.v3 v3.0.1 // indirect
+
 replace github.com/munisp/meridian-compliance-suite => ../..

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/munisp/meridian-compliance-suite/packages/authx"
+	"github.com/munisp/meridian-compliance-suite/packages/shared/rulepack"
 )
 
 // ---------- Money: integer kobo only (SPEC §1.3). Never floats. ----------
@@ -51,6 +52,9 @@ type Receipt struct {
 	Attribution    AttributionResult `json:"attribution"`
 	Status         string            `json:"status"` // ingested|spooled|settled
 	RulePackVersion string           `json:"rule_pack_version"`
+	// Citations: LCE SPEC §5 statute citations per computed VAT amount
+	// (additive response-layer field; empty when no VAT-bearing basket).
+	Citations      []rulepack.Citation `json:"citations,omitempty"`
 }
 
 // AttributionResult holds federal/state attribution (+ dual_shadow pair).
