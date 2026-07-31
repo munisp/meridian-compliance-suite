@@ -68,10 +68,53 @@ type CanonicalInvoice struct {
 	CSIDKeyID        string        `json:"csid_key_id,omitempty"`
 	IdempotencyKey   string        `json:"idempotency_key,omitempty"`
 	SourceAdapter    string        `json:"source_adapter,omitempty"`
-	UBLXML           string        `json:"ubl_xml,omitempty"`
-	Validation       []Violation   `json:"validation,omitempty"`
-	CreatedAt        time.Time     `json:"created_at"`
-	UpdatedAt        time.Time     `json:"updated_at"`
+	// NRS parity fields (all optional; existing flows unaffected).
+	BusinessID       string       `json:"business_id,omitempty"`
+	ServiceID        string       `json:"service_id,omitempty"`        // NRS 8-char integrator id used in the IRN
+	InvoiceTypeCode  string       `json:"invoice_type_code,omitempty"` // UNTDID 1001, e.g. 380|381|383
+	PaymentStatus    string       `json:"payment_status,omitempty"`    // PENDING|PAID|REJECTED
+	PaymentReference string       `json:"payment_reference,omitempty"`
+	SignedCoreHash   string       `json:"signed_core_hash,omitempty"` // core-field hash at invoice signage (immutability)
+	NRSPayload       string       `json:"nrs_payload,omitempty"`      // original NRS-schema JSON (resubmission/revalidation)
+	Audit            []AuditEntry `json:"audit,omitempty"`
+	UBLXML           string       `json:"ubl_xml,omitempty"`
+	Validation       []Violation  `json:"validation,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
+}
+
+// AuditEntry is one immutable audit-trail record (payment-status updates,
+// lifecycle transitions).
+type AuditEntry struct {
+	At     string `json:"at"`
+	Action string `json:"action"` // e.g. payment_status_update
+	Detail string `json:"detail"`
+	Actor  string `json:"actor,omitempty"`
+}
+
+// CoreHash hashes only the locked core fields (parties, lines, totals,
+// number, dates). Computed at invoice-signage time; any later change to a
+// core field changes the hash, which is how post-signage immutability is
+// enforced. Mutable fields (payment_status, payment_reference, status) are
+// excluded by construction.
+func (inv *CanonicalInvoice) CoreHash() string {
+	c := struct {
+		Number   string        `json:"n"`
+		Issued   string        `json:"i"`
+		Due      string        `json:"d"`
+		TypeCode string        `json:"tc"`
+		Currency string        `json:"cur"`
+		Supplier Party         `json:"s"`
+		Customer Party         `json:"c"`
+		Lines    []InvoiceLine `json:"l"`
+		Excl     int64         `json:"e"`
+		Tax      int64         `json:"t"`
+		Payable  int64         `json:"p"`
+	}{inv.InvoiceNumber, inv.IssueDate, inv.DueDate, inv.InvoiceTypeCode, inv.Currency,
+		inv.Supplier, inv.Customer, inv.Lines, inv.TaxExclusiveKobo, inv.TaxKobo, inv.PayableKobo}
+	b, _ := json.Marshal(c)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // Violation is one validation finding from rp-ubl-bis / rp-mbs-business-rules.
