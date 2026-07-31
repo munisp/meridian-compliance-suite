@@ -1,0 +1,48 @@
+# Coverage matrix — pre-NTA CITA / Finance Act 2019 (CIT back-periods)
+statute:
+  id: cita-legacy
+  title: Companies Income Tax Act (as amended by Finance Act 2019) — legacy regime to 2025-12-31
+  jurisdiction: NG-FED
+  effective_from: '2020-01-01'
+  effective_to: '2025-12-31'
+  gazette: Finance Act 2019
+  subject_to_regazette: false
+
+sections:
+  - section_id: cit-rates.0-20-30
+    title: CIT 0% (<= N25m) / 20% (N25m-N100m) / 30% (> N100m) by turnover
+    implementing_rules:
+      - rp-cit-legacy:cit.legacy.small-company.zero
+      - rp-cit-legacy:cit.legacy.medium-company.rate
+      - rp-cit-legacy:cit.legacy.large-company.rate
+      - rp-cit-legacy:cit.legacy.definition.small
+      - rp-cit-legacy:cit.legacy.definition.medium
+    conformance_tests:
+      - test_t4_legacy_cit_rates_for_2025_period
+      - test_t4_legacy_cit_pack_effective_window
+      - test_t4_effective_date_dispatch_legacy_rules_silent_in_2026
+      - cit.legacy-boundaries.small-20m-zero
+      - cit.legacy-boundaries.medium-50m-20pct
+      - cit.legacy-boundaries.large-150m-30pct
+      - cit.legacy-boundaries.last-day-2025-12-31
+      - cit.legacy-boundaries.dispatch-2026-01-01-silent
+      - cit.legacy-boundaries.nta-standard-30-from-2026
+    status: IMPLEMENTED
+    citation_kind: primary
+    notes: T4 — legacy pack must return no rule for 2026 dates (dispatch-negative case).
+
+  - section_id: tet.2pct
+    title: Tertiary education tax 2% of assessable profit (legacy)
+    implementing_rules:
+      - rp-cit-legacy:cit.legacy.tet.rate
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: cgt.10pct-legacy
+    title: Capital gains tax 10% (legacy rate, pre-2026)
+    implementing_rules:
+      - rp-cgt:cgt.rate.legacy
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary

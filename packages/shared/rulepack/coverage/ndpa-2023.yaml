@@ -1,0 +1,47 @@
+# Coverage matrix — Nigeria Data Protection Act 2023
+statute:
+  id: ndpa-2023
+  title: Nigeria Data Protection Act 2023
+  jurisdiction: NG-FED
+  effective_from: '2023-06-12'
+  gazette: Nigeria Data Protection Act 2023
+  subject_to_regazette: false
+
+sections:
+  - section_id: disclosure.k-anonymity-k5
+    title: Disclosure control — k-anonymity k=5 minimum cohort for shared datasets
+    implementing_rules:
+      - rp-disclosure-control:disclosure.k-anonymity
+      - rp-disclosure-control:disclosure.complementary-suppression
+      - rp-disclosure-control:disclosure.case-feed.min-cohort
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+    notes: Platform disclosure control aligned to NDPA minimisation principle.
+
+  - section_id: data-subject-rights
+    title: Data subject rights workflows (access, rectification, erasure)
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://ndpc.gov.ng/
+    citation_kind: primary
+    notes: Pending privacy audit (security-gaps register cross-ref).
+
+  - section_id: breach-notification
+    title: Breach notification to NDPC within statutory window
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://ndpc.gov.ng/
+    citation_kind: primary
+    notes: Pending privacy audit.
+
+  - section_id: cross-border-transfer
+    title: Cross-border transfer adequacy controls
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://ndpc.gov.ng/
+    citation_kind: primary
+    notes: Pending privacy audit.

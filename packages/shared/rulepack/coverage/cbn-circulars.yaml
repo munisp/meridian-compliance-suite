@@ -1,0 +1,39 @@
+# Coverage matrix — CBN circulars (bank thresholds, EMTL-adjacent)
+statute:
+  id: cbn-circulars
+  title: Central Bank of Nigeria circulars — reporting thresholds, cash limits, EMTL-adjacent
+  jurisdiction: NG-FED
+  effective_from: '2020-01-01'
+  gazette: CBN circulars (various)
+  subject_to_regazette: true
+
+sections:
+  - section_id: bank-reporting.thresholds
+    title: Bank transaction reporting thresholds (individual / corporate)
+    implementing_rules:
+      - rp-bank-thresholds:bank.report.individual
+      - rp-bank-thresholds:bank.report.corporate
+      - rp-bank-thresholds:bank.cash.single-report
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: cash-limits
+    title: Cash withdrawal/deposit limits (individual / corporate)
+    implementing_rules:
+      - rp-bank-thresholds:bank.cash.limit.individual
+      - rp-bank-thresholds:bank.cash.limit.corporate
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: emtl.50-above-10k
+    title: Electronic Money Transfer Levy — N50 on transfers of N10,000 and above
+    implementing_rules:
+      - rp-stamp-duty:sd.emtl.electronic-transfer
+      - rp-stamp-duty:sd.emtl.below-threshold
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+    notes: EMTL administered under the Stamp Duties Act as amended; tracked with CBN
+      circular feed in docs/LEGISLATION_WATCH.md.

@@ -1,0 +1,119 @@
+# Coverage matrix — Nigeria Tax Act 2025
+statute:
+  id: nta-2025
+  title: Nigeria Tax Act 2025
+  jurisdiction: NG-FED
+  effective_from: '2026-01-01'
+  gazette: Nigeria Tax Act 2025 (signed 26 June 2025; gazette CTC pending)
+  subject_to_regazette: true
+
+sections:
+  - section_id: first-schedule.pit-bands
+    title: PIT bands 0% to 25% (N800k ... N50m+)
+    implementing_rules:
+      - rp-education-ng:pit.band.1
+      - rp-education-ng:pit.band.2
+      - rp-education-ng:pit.band.3
+      - rp-education-ng:pit.band.4
+      - rp-education-ng:pit.band.5
+      - rp-education-ng:pit.band.6
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: s.30.rent-relief
+    title: Rent relief — 20% of rent paid, capped at N500,000
+    implementing_rules:
+      - rp-education-ng:pit.rent-relief
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: s.56.cit-small-company
+    title: Small company (turnover <= N100m AND fixed assets <= N250m) — 0% CIT
+    implementing_rules:
+      - rp-education-ng:cit.small-company.zero
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: cit.standard-30
+    title: CIT standard rate 30%
+    implementing_rules:
+      - rp-education-ng:cit.standard-rate
+    conformance_tests:
+      - test_t4_effective_date_dispatch_legacy_rules_silent_in_2026
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: s.187.zero-rated-medical
+    title: Medical services zero-rated from 2026-01-01 (was exempt)
+    implementing_rules:
+      - rp-vat-zerorated-basket:vat.zero.medical-services
+    conformance_tests:
+      - test_t6_medical_and_tuition_zero_rated_from_2026
+      - vat.baskets.medical-exempt-2025
+      - vat.baskets.medical-exempt-boundary-2025-12-31
+      - vat.baskets.medical-zero-rated-2026-01-01
+      - vat.baskets.medical-exempt-pack-silent-2026
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: s.187.zero-rated-tuition
+    title: Tuition (nursery/primary/secondary/tertiary) zero-rated from 2026-01-01 (was exempt)
+    implementing_rules:
+      - rp-vat-zerorated-basket:vat.zero.education-tuition
+    conformance_tests:
+      - test_t6_medical_and_tuition_zero_rated_from_2026
+      - vat.baskets.tuition-exempt-2025
+      - vat.baskets.tuition-exempt-boundary-2025-12-31
+      - vat.baskets.tuition-zero-rated-2026-01-01
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: digital-assets.chargeable-gains
+    title: Digital/virtual assets are chargeable assets; gains taxed at marginal rates
+    implementing_rules:
+      - rp-nta-digital-assets:da.chargeable-asset
+      - rp-nta-digital-assets:da.gain.formula
+      - rp-nta-digital-assets:da.loss.ringfence
+      - rp-nta-digital-assets:da.individual.rate
+      - rp-nta-digital-assets:da.company.rate
+      - rp-nta-digital-assets:da.events.taxable
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: s.57.etr-15pct-minimum
+    title: Minimum effective tax rate 15% (MNE and large domestic)
+    implementing_rules:
+      - rp-etr-nta:etr.nta.minimum-rate
+      - rp-etr-nta:etr.nta.scope.mne
+      - rp-etr-nta:etr.nta.scope.large-domestic
+      - rp-etr-nta:etr.nta.topup
+      - rp-etr-nta:etr.nta.small-company.out-of-scope
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: cgt-2026-alignment
+    title: CGT aligned to CIT/PIT rates from 2026 (companies 30%/0%, individuals marginal)
+    implementing_rules:
+      - rp-cgt:cgt.rate.company.nta
+      - rp-cgt:cgt.rate.company.small.nta
+      - rp-cgt:cgt.rate.individual.nta
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: presumptive-framework
+    title: Presumptive tax framework for informal operators (turnover-band table)
+    implementing_rules:
+      - rp-presumptive-federal:presumptive.table.federal
+      - rp-presumptive-federal:presumptive.eligibility
+      - rp-presumptive-federal:presumptive.exempt.micro
+    conformance_tests: []
+    status: UNSOURCED
+    citation_url: https://www.financeministry.gov.ng/
+    citation_kind: secondary
+    notes: "Audit finding #18 — NRS presumptive framework still draft; bands unverifiable against a gazette. Pack rp-presumptive-federal is subject_to_regazette; flips when the framework is published (see docs/LEGISLATION_WATCH.md)."
