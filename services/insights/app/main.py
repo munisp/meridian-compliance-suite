@@ -5,12 +5,23 @@ from __future__ import annotations
 import os
 from datetime import date
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
+
+from meridian_py.dev_jwt import (AuthDep, Principal, require_roles,
+                                 validate_auth_config)
 
 from . import benchmarks, circularity, explain, fx, penalties, reminders
 
+# Fail closed at startup when AUTH_MODE=keycloak is missing OIDC config.
+validate_auth_config()
+
 app = FastAPI(title="insights", version="1.0.0")
+
+# Role claims -> scopes: admin/operator may run analyses (write scope);
+# any authenticated principal (incl. auditor) may read (read scope).
+ReadDep = AuthDep
+WriteDep = Depends(require_roles("admin", "operator"))
 
 
 @app.get("/healthz")
@@ -27,7 +38,7 @@ class CircularityIn(BaseModel):
 
 
 @app.post("/v1/insights/circularity")
-def post_circularity(body: CircularityIn):
+def post_circularity(body: CircularityIn, _: Principal = WriteDep):
     g = circularity.build_graph(body.invoices)
     cycles = circularity.find_cycles(g, body.max_len, body.min_vat_kobo)
     return {"backend": "in-memory", "nodes": len(g.nodes()),
@@ -41,7 +52,7 @@ class BenchmarkIn(BaseModel):
 
 
 @app.post("/v1/insights/benchmarks")
-def post_benchmarks(body: BenchmarkIn):
+def post_benchmarks(body: BenchmarkIn, _: Principal = WriteDep):
     recs = [benchmarks.TaxpayerPeriod(r["tin"], r["sector"],
                                       int(r["turnover_kobo"]), int(r["tax_paid_kobo"]))
             for r in body.records]
@@ -58,7 +69,7 @@ class PenaltyIn(BaseModel):
 
 
 @app.post("/v1/insights/penalties")
-def post_penalties(body: PenaltyIn):
+def post_penalties(body: PenaltyIn, _: Principal = WriteDep):
     try:
         res = penalties.compute(
             body.tax_type, date.fromisoformat(body.due_date),
@@ -101,7 +112,7 @@ class ReminderIn(BaseModel):
 
 
 @app.post("/v1/insights/reminders")
-def post_reminders(body: ReminderIn):
+def post_reminders(body: ReminderIn, _: Principal = WriteDep):
     r = reminders.schedule(
         body.tenant_id, body.tax, date.fromisoformat(body.period),
         body.history, date.fromisoformat(body.year_end) if body.year_end else None)
@@ -117,7 +128,7 @@ class ExplainIn(BaseModel):
 
 
 @app.post("/v1/insights/explain")
-def post_explain(body: ExplainIn):
+def post_explain(body: ExplainIn, _: Principal = WriteDep):
     card = explain.build_card(body.invoice_id, body.trace)
     return card.as_dict()
 
@@ -134,7 +145,7 @@ _fx = fx.FXService()
 
 
 @app.post("/v1/insights/fx/convert")
-def post_fx(body: FXIn):
+def post_fx(body: FXIn, _: Principal = WriteDep):
     try:
         return _fx.convert_to_ngn_kobo(body.amount_minor, body.currency,
                                        date.fromisoformat(body.date), body.invoice_id)
@@ -143,5 +154,5 @@ def post_fx(body: FXIn):
 
 
 @app.get("/v1/insights/fx/audit")
-def fx_audit():
+def fx_audit(_: Principal = ReadDep):
     return {"entries": _fx.audit[-100:], "count": len(_fx.audit)}

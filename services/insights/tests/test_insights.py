@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+# AUTH_MODE=dev (default): authenticate every request via the dev-role header.
+client.headers["X-Dev-Role"] = "operator"
 
 INVS = [
     {"invoice_id": "i1", "supplier_tin": "A", "customer_tin": "B", "vat_kobo": 75000},
