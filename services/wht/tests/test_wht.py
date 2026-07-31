@@ -1,8 +1,11 @@
 """WHT engine tests — canonical rp-wht-2024 pack (byte-identical to rule-packs repo).
 
-Rates per Deduction of Tax at Source (Withholding) Regulations 2024:
-  dividend/interest/rent 10%/10%, royalty 10% corp / 5% ind,
-  goods & construction 2%/2%, services & commission 5%/5%, directors' fees 10%.
+Rates per Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule:
+  dividend/interest/rent 10%/10%, royalty 10% corp / 5% ind (5% ind also non-resident),
+  goods 2%, construction 2% roads/bridges/buildings/power plants vs 5% other
+  (non-resident 5%/10%), professional/consultancy/technical/management/commission 5%,
+  generic "other services" 2% resident / 5% non-resident, directors' fees 15%/20%,
+  winnings 5% resident / 15% non-resident (from 2024-10-01).
 """
 from fastapi.testclient import TestClient
 
@@ -19,21 +22,29 @@ def test_health_ready():
 
 
 def test_base_rates_company_vs_individual():
-    # services, company, valid TIN -> 5% (canonical; embedded drift had 2%)
+    # generic "other services", company, valid TIN -> 2% (First Schedule row
+    # "services other than those specifically listed"; professional/consultancy
+    # stay 5% — the 2026-07-31 audit split)
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "services", "beneficiary": "company",
         "amount_kobo": 5_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-02-10"})
     body = r.json()
-    assert body["rate_bps"] == 500
-    assert body["wht_kobo"] == 5_000_000_00 * 500 // 10_000  # 5% of N5m
+    assert body["rate_bps"] == 200
+    assert body["wht_kobo"] == 5_000_000_00 * 200 // 10_000  # 2% of N5m
     assert body["deduction_trigger"] == "payment"
-    # services, individual -> 5%
+    # services, individual -> 2%
     r2 = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "services", "beneficiary": "individual",
         "amount_kobo": 5_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-02-10"})
-    assert r2.json()["rate_bps"] == 500
+    assert r2.json()["rate_bps"] == 200
+    # professional services stay 5%
+    rp = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "professional", "beneficiary": "company",
+        "amount_kobo": 5_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert rp.json()["rate_bps"] == 500
     # dividend 10%
     r3 = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "dividend", "beneficiary": "company",
@@ -51,24 +62,88 @@ def test_base_rates_company_vs_individual():
         "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
         "payment_date": "2026-02-10"})
     assert r5.json()["rate_bps"] == 500
-    # goods & construction 2% for BOTH beneficiary classes (drift had 5% ind)
-    for ptype in ("supply_of_goods_materials", "construction"):
-        for bene in ("company", "individual"):
-            rr = client.post("/v1/wht/evaluate", headers=H, json={
-                "payment_type": ptype, "beneficiary": bene,
-                "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
-                "payment_date": "2026-02-10"})
-            assert rr.json()["rate_bps"] == 200, (ptype, bene)
+    # goods 2% for BOTH beneficiary classes (drift had 5% ind)
+    for bene in ("company", "individual"):
+        rr = client.post("/v1/wht/evaluate", headers=H, json={
+            "payment_type": "supply_of_goods_materials", "beneficiary": bene,
+            "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+            "payment_date": "2026-02-10"})
+        assert rr.json()["rate_bps"] == 200, bene
+    # construction: roads/bridges/buildings/power plants 2%; any OTHER
+    # construction 5% (default when no construction_type supplied)
+    rr = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "construction", "beneficiary": "company",
+        "construction_type": "roads",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert rr.json()["rate_bps"] == 200
+    for bene in ("company", "individual"):
+        rr = client.post("/v1/wht/evaluate", headers=H, json={
+            "payment_type": "construction", "beneficiary": bene,
+            "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+            "payment_date": "2026-02-10"})
+        assert rr.json()["rate_bps"] == 500, bene
+
+
+def test_first_schedule_2024_corrections():
+    """2026-07-31 audit corrections, behaviorally through the engine."""
+    # directors' fees: 15% resident / 20% non-resident individual
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "directors_fees", "beneficiary": "individual",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["rate_bps"] == 1500
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "directors_fees", "beneficiary": "individual",
+        "beneficiary_residence": "non_resident",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["rate_bps"] == 2000
+    # winnings: 5% resident / 15% non-resident (NOT exempt, from 2024-10-01)
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "winnings", "source": "lottery", "beneficiary": "individual",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    body = r.json()
+    assert body["rate_bps"] == 500 and body["exempt"] is False
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "winnings", "source": "gaming", "beneficiary": "individual",
+        "beneficiary_residence": "non_resident",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["rate_bps"] == 1500
+    # royalty non-resident INDIVIDUAL stays 5% (not clobbered by the 10% NR rule)
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "royalty", "beneficiary": "individual",
+        "beneficiary_residence": "non_resident",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["rate_bps"] == 500
+    # construction non-resident: 5% core / 10% other
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "construction", "construction_type": "buildings",
+        "beneficiary": "company", "beneficiary_residence": "non_resident",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["rate_bps"] == 500
+    r = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "construction", "construction_type": "other",
+        "beneficiary": "company", "beneficiary_residence": "non_resident",
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
+    assert r.json()["rate_bps"] == 1000
 
 
 def test_legacy_aliases_mapped():
-    # goods -> supply_of_goods_materials, contract -> construction (2%)
-    for alias in ("goods", "contract"):
+    # goods -> supply_of_goods_materials (2%); contract -> construction
+    # (5% — defaults to "any other construction" without a construction_type)
+    expected = {"goods": 200, "contract": 500}
+    for alias, want in expected.items():
         r = client.post("/v1/wht/evaluate", headers=H, json={
             "payment_type": alias, "beneficiary": "company",
             "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
             "payment_date": "2026-02-10"})
-        assert r.json()["rate_bps"] == 200, alias
+        assert r.json()["rate_bps"] == want, alias
 
 
 def test_unknown_payment_type_422():
@@ -95,7 +170,7 @@ def test_earlier_of_payment_or_settlement():
 
 
 def test_no_tin_double_rate():
-    # commission company 5% -> doubled to 10% without TIN
+    # commission company 5% -> doubled to 10% without TIN (active income)
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "commission", "beneficiary": "company",
         "amount_kobo": 5_000_000_00, "payment_date": "2026-02-10"})
@@ -104,38 +179,67 @@ def test_no_tin_double_rate():
     assert body["no_tin_double_applied"] is True
 
 
+def test_no_tin_double_rate_not_applied_to_passive_income():
+    # Regs/PwC: the no-TIN double rate does NOT apply to passive income
+    for pt in ("dividend", "interest", "royalty", "rent"):
+        r = client.post("/v1/wht/evaluate", headers=H, json={
+            "payment_type": pt, "beneficiary": "company",
+            "amount_kobo": 5_000_000_00, "payment_date": "2026-02-10"})
+        body = r.json()
+        assert body["rate_bps"] == 1000, pt
+        assert body["no_tin_double_applied"] is False, pt
+
+
 def test_nin_acceptable_for_individual():
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "services", "beneficiary": "individual",
         "amount_kobo": 5_000_000_00, "nin": "12345678901",
         "payment_date": "2026-02-10"})
     body = r.json()
-    assert body["rate_bps"] == 500  # NOT doubled
+    assert body["rate_bps"] == 200  # NOT doubled (2% other-services)
     assert body["no_tin_double_applied"] is False
     assert body["identity"]["nin_accepted"] is True
 
 
 def test_small_company_carveout():
-    # small company (turnover <= N2m/month), valid TIN -> no deduction
+    # PAYER is a small company (<= N25m p.a.), transaction <= N2m in the
+    # calendar month, supplier has valid TIN -> no deduction (WHT Regs 2024 reg. 4)
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "supply_of_goods_materials", "beneficiary": "company",
         "amount_kobo": 1_500_000_00,
-        "supplier_size": "small",
-        "supplier_monthly_turnover_kobo": 1_500_000_00,
+        "payer_size": "small",
+        "payer_annual_turnover_kobo": 20_000_000_00,
         "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
     body = r.json()
     assert body["rate_bps"] == 0
     assert body["small_company_carveout"] is True
     assert body["wht_kobo"] == 0
-    # boundary: turnover EXACTLY N2m is still carved out (lte)
+    # boundary: transaction value EXACTLY N2m in the month is still carved out (lte)
     rb = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "supply_of_goods_materials", "beneficiary": "company",
         "amount_kobo": 2_000_000_00,
-        "supplier_size": "small",
-        "supplier_monthly_turnover_kobo": 2_000_000_00,
+        "payer_size": "small",
+        "payer_annual_turnover_kobo": 25_000_000_00,
         "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
     assert rb.json()["small_company_carveout"] is True
-    # audit fix: a <= N2m PAYMENT alone (no size/turnover facts) must NOT carve out
+    # REGRESSION: carve-out must NEVER be granted without a supplier TIN
+    rn = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
+        "amount_kobo": 1_500_000_00,
+        "payer_size": "small",
+        "payer_annual_turnover_kobo": 20_000_000_00,
+        "payment_date": "2026-02-10"})
+    assert rn.json()["small_company_carveout"] is False
+    # payer not small -> no carve-out even with TIN and small amount
+    r3 = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
+        "amount_kobo": 1_500_000_00,
+        "payer_size": "large",
+        "payer_annual_turnover_kobo": 500_000_000_00,
+        "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
+    assert r3.json()["small_company_carveout"] is False
+    assert r3.json()["rate_bps"] == 200
+    # audit fix: a <= N2m PAYMENT alone (no payer facts) must NOT carve out
     r2 = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "supply_of_goods_materials", "beneficiary": "company",
         "amount_kobo": 1_500_000_00,
@@ -143,6 +247,15 @@ def test_small_company_carveout():
     body2 = r2.json()
     assert body2["small_company_carveout"] is False
     assert body2["rate_bps"] == 200
+    # legacy supplier-side modeling must NOT trigger the carve-out anymore
+    r4 = client.post("/v1/wht/evaluate", headers=H, json={
+        "payment_type": "supply_of_goods_materials", "beneficiary": "company",
+        "amount_kobo": 1_500_000_00,
+        "supplier_size": "small",
+        "supplier_monthly_turnover_kobo": 1_500_000_00,
+        "supplier_tin": "1234567890123", "payment_date": "2026-02-10"})
+    assert r4.json()["small_company_carveout"] is False
+    assert r4.json()["rate_bps"] == 200
 
 
 def test_exemptions():
@@ -193,7 +306,7 @@ def test_ledger_credits_and_remit_file():
     rf = client.post("/v1/wht/remit-file", headers=H, json={"period": "2026-02"})
     assert rf.status_code == 201
     body = rf.json()
-    per_ded = 10_000_000_00 * 500 // 10_000  # 5% of N10m = 50,000,000 kobo
+    per_ded = 10_000_000_00 * 200 // 10_000  # 2% of N10m = 20,000,000 kobo
     assert body["total_wht_kobo"] == 2 * per_ded
     assert "batch_id,vendor_tin" in body["files"]["csv"]
     assert "<WhtRemittance" in body["files"]["xml"]
