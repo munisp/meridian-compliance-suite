@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
-import { api, kobo } from '../api'
-import { Card, Empty, ErrorNote, PageTitle, Status } from '../components/ui'
+import { api } from '../api'
+import { Card, Empty, ErrorNote, Field, MoneyInput, PageTitle, Status } from '../components/ui'
 
 export default function Einvoicing() {
-  const [form, setForm] = useState({ supplier_tin: '', buyer_tin: '', amount: '100000', currency: 'NGN' })
+  const [form, setForm] = useState({ supplier_tin: '', buyer_tin: '', currency: 'NGN' })
+  const [amountKobo, setAmountKobo] = useState<number | null>(10_000_000)
   const [submitting, setSubmitting] = useState(false)
   const [invoice, setInvoice] = useState<any>(null)
   const [error, setError] = useState<any>(null)
@@ -16,7 +17,7 @@ export default function Einvoicing() {
     try {
       // Canonical REST payload — must match CanonicalInvoice JSON exactly
       // (contract test: services/einvoicing TestPortalPayloadContract).
-      const amountKobo = Math.round(parseFloat(form.amount) * 100)
+      if (amountKobo == null) throw new Error('Enter a valid amount')
       const today = new Date().toISOString().slice(0, 10)
       const res = await api('einvoicing').post('/v1/invoices', {
         invoice_number: `WEB-${Date.now()}`,
@@ -61,15 +62,23 @@ export default function Einvoicing() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Card title="Submit invoice">
           <form onSubmit={submit} className="space-y-3">
-            <div><label className="label">Supplier TIN</label>
-              <input className="input" value={form.supplier_tin} required
-                onChange={(e) => setForm({ ...form, supplier_tin: e.target.value })} placeholder="12345678-0001" /></div>
-            <div><label className="label">Buyer TIN</label>
-              <input className="input" value={form.buyer_tin} required
-                onChange={(e) => setForm({ ...form, buyer_tin: e.target.value })} placeholder="87654321-0001" /></div>
-            <div><label className="label">Amount (NGN)</label>
-              <input className="input" type="number" min="1" value={form.amount} required
-                onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
+            <Field label="Supplier TIN" required>
+              {(id, describedBy) => (
+                <input id={id} className="input font-mono" value={form.supplier_tin} required
+                  onChange={(e) => setForm({ ...form, supplier_tin: e.target.value })} placeholder="12345678-0001"
+                  aria-describedby={describedBy} aria-required="true" />)}
+            </Field>
+            <Field label="Buyer TIN" required>
+              {(id, describedBy) => (
+                <input id={id} className="input font-mono" value={form.buyer_tin} required
+                  onChange={(e) => setForm({ ...form, buyer_tin: e.target.value })} placeholder="87654321-0001"
+                  aria-describedby={describedBy} aria-required="true" />)}
+            </Field>
+            <Field label="Amount (NGN)" required>
+              {(id, describedBy) => (
+                <MoneyInput id={id} valueKobo={amountKobo} onChangeKobo={setAmountKobo}
+                  aria-describedby={describedBy} aria-required />)}
+            </Field>
             <button className="btn" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit + pre-clear'}</button>
           </form>
           {error && <div className="mt-3"><ErrorNote error={error} /></div>}
@@ -84,9 +93,9 @@ export default function Einvoicing() {
               <Row k="Rule pack" v={invoice.rule_pack_version || invoice.invoice?.rule_pack_version} />
               {invoice.qr?.qr_svg && (
                 <div className="pt-2">
-                  <span className="text-sand-500 text-xs">Verification QR (IRN + HMAC)</span>
+                  <span className="text-stone-600 text-xs">Verification QR (IRN + HMAC)</span>
                   <div className="mt-1 w-36" dangerouslySetInnerHTML={{ __html: invoice.qr.qr_svg }} />
-                  <div className="font-mono text-[10px] break-all text-sand-400 mt-1">{invoice.qr.payload}</div>
+                  <div className="font-mono text-[10px] break-all text-stone-600 mt-1">{invoice.qr.payload}</div>
                 </div>
               )}
             </div>
@@ -98,7 +107,7 @@ export default function Einvoicing() {
           <input className="input" value={lookupId} onChange={(e) => setLookupId(e.target.value)} placeholder="invoice id" />
           <button className="btn-ghost">Fetch</button>
         </form>
-        {lookup && <pre className="mt-3 text-xs bg-sand-50 rounded-lg p-3 overflow-auto">{JSON.stringify(lookup, null, 2)}</pre>}
+        {lookup && <pre className="mt-3 text-xs bg-neutral-50 rounded-lg p-3 overflow-auto">{JSON.stringify(lookup, null, 2)}</pre>}
       </Card>
     </div>
   )
@@ -107,7 +116,7 @@ export default function Einvoicing() {
 function Row({ k, v, mono }: { k: string; v: any; mono?: boolean }) {
   return (
     <div className="flex justify-between gap-4">
-      <span className="text-sand-500">{k}</span>
+      <span className="text-stone-600">{k}</span>
       <span className={mono ? 'font-mono text-xs text-right break-all' : 'text-right'}>{v}</span>
     </div>
   )

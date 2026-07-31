@@ -32,9 +32,9 @@ export default function Dashboard() {
             <Card>
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-medium text-sand-900 group-hover:text-clay-700">{s.name}</div>
-                  <div className="text-sm text-sand-500 mt-1">{s.desc}</div>
-                  <div className="text-xs text-sand-400 mt-3">{BASES[s.key]}</div>
+                  <div className="font-medium text-neutral-900 group-hover:text-brand-700">{s.name}</div>
+                  <div className="text-sm text-stone-600 mt-1">{s.desc}</div>
+                  <div className="text-xs text-stone-600 mt-3">{BASES[s.key]}</div>
                 </div>
                 <Status value={health[s.key] || 'checking'} />
               </div>
