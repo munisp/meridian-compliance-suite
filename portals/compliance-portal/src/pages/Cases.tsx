@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api'
-import { Card, Empty, ErrorNote, PageTitle, Status } from '../components/ui'
+import { Card, Empty, ErrorNote, Field, PageTitle, Status } from '../components/ui'
 
 export default function Cases() {
   const [matters, setMatters] = useState<any[]>([])
@@ -63,30 +63,33 @@ export default function Cases() {
         <div className="space-y-5">
           <Card title="New matter">
             <form onSubmit={create} className="space-y-3">
-              <div><label className="label">Title</label>
-                <input className="input" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
-              <div><label className="label">Client ID</label>
-                <input className="input" required value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} /></div>
-              <div><label className="label">Practice area</label>
-                <select className="input" value={form.practice_area} onChange={(e) => setForm({ ...form, practice_area: e.target.value })}>
+              <Field label="Title" required id="matter-title">
+                <input id="matter-title" className="input" required aria-required="true" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              </Field>
+              <Field label="Client ID" required id="matter-client">
+                <input id="matter-client" className="input" required aria-required="true" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+              </Field>
+              <Field label="Practice area" id="matter-area">
+                <select id="matter-area" className="input" value={form.practice_area} onChange={(e) => setForm({ ...form, practice_area: e.target.value })}>
                   <option value="tax-appeal">tax-appeal</option><option value="audit-defence">audit-defence</option>
                   <option value="advisory">advisory</option><option value="ombud-referral">ombud-referral</option>
-                </select></div>
+                </select>
+              </Field>
               <button className="btn">Open matter</button>
             </form>
           </Card>
           <Card title={`Matters (${matters.length})`}>
             {matters.length === 0 ? <Empty>No matters yet.</Empty> : (
-              <ul className="divide-y divide-sand-100">
+              <ul className="divide-y divide-neutral-100">
                 {matters.map((m: any) => (
                   <li key={m.id}>
                     <button onClick={() => open(m)}
-                      className={`w-full text-left px-2 py-2 rounded-lg hover:bg-sand-50 ${selected?.id === m.id ? 'bg-sand-100' : ''}`}>
+                      className={`w-full text-left px-2 py-2 rounded-lg hover:bg-neutral-50 ${selected?.id === m.id ? 'bg-neutral-100' : ''}`}>
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-sand-800">{m.title}</span>
+                        <span className="text-sm font-medium text-neutral-800">{m.title}</span>
                         <Status value={m.status} />
                       </div>
-                      <div className="text-xs text-sand-400">{m.ref} · {m.client_name || m.client_id}</div>
+                      <div className="text-xs text-stone-600">{m.ref} · {m.client_name || m.client_id}</div>
                     </button>
                   </li>
                 ))}
@@ -101,13 +104,13 @@ export default function Cases() {
               actions={<button className="btn-ghost" onClick={buildEvidence}>Build evidence pack</button>}>
               {docs.length === 0 ? <Empty>No documents uploaded.</Empty> : (
                 <table className="w-full">
-                  <thead><tr><th className="th">Name</th><th className="th">SHA-256</th><th className="th">Privilege</th><th className="th">Uploaded</th></tr></thead>
+                  <thead><tr><th scope="col" className="th">Name</th><th scope="col" className="th">SHA-256</th><th scope="col" className="th">Privilege</th><th scope="col" className="th">Uploaded</th></tr></thead>
                   <tbody>
                     {docs.map((d: any) => (
                       <tr key={d.id}>
                         <td className="td">{d.name}</td>
                         <td className="td font-mono text-xs">{d.sha256?.slice(0, 12)}…</td>
-                        <td className="td">{d.privileged ? <span className="badge bg-amber-100 text-amber-800">privileged</span> : <span className="text-xs text-sand-400">—</span>}</td>
+                        <td className="td">{d.privileged ? <span className="chip-warning">privileged</span> : <span className="text-xs text-stone-600">—</span>}</td>
                         <td className="td text-xs">{d.uploaded_at?.slice(0, 10)}</td>
                       </tr>
                     ))}
@@ -115,7 +118,7 @@ export default function Cases() {
                 </table>
               )}
               {evidence && (
-                <div className="mt-3 rounded-lg bg-moss-500/10 border border-moss-500/30 p-3 text-xs">
+                <div className="mt-3 rounded-lg bg-success border border-success-strong/40 p-3 text-xs">
                   Evidence pack sealed → WORM <span className="font-mono">{evidence.worm_receipt?.worm_uri}</span>
                   <br />sha256: <span className="font-mono">{evidence.worm_receipt?.sha256?.slice(0, 24)}…</span> ({evidence.worm_receipt?.source})
                 </div>
@@ -124,13 +127,13 @@ export default function Cases() {
             <Card title="Deadlines">
               {deadlines.length === 0 ? <Empty>No deadlines set.</Empty> : (
                 <table className="w-full mb-4">
-                  <thead><tr><th className="th">Title</th><th className="th">Due</th><th className="th">Severity</th><th className="th">Status</th></tr></thead>
+                  <thead><tr><th scope="col" className="th">Title</th><th scope="col" className="th">Due</th><th scope="col" className="th">Severity</th><th scope="col" className="th">Status</th></tr></thead>
                   <tbody>
                     {deadlines.map((d: any) => (
                       <tr key={d.id}>
                         <td className="td">{d.title}</td>
                         <td className="td text-xs">{d.due_at?.replace('T', ' ').slice(0, 16)}</td>
-                        <td className="td">{d.severity}</td>
+                        <td className="td"><Status value={d.severity} /></td>
                         <td className="td"><Status value={d.status} /></td>
                       </tr>
                     ))}
@@ -138,14 +141,17 @@ export default function Cases() {
                 </table>
               )}
               <form onSubmit={addDeadline} className="flex flex-wrap items-end gap-2">
-                <div><label className="label">Title</label>
-                  <input className="input w-48" required value={dlForm.title} onChange={(e) => setDlForm({ ...dlForm, title: e.target.value })} /></div>
-                <div><label className="label">Due</label>
-                  <input className="input" type="datetime-local" required value={dlForm.due_at} onChange={(e) => setDlForm({ ...dlForm, due_at: e.target.value })} /></div>
-                <div><label className="label">Severity</label>
-                  <select className="input" value={dlForm.severity} onChange={(e) => setDlForm({ ...dlForm, severity: e.target.value })}>
+                <Field label="Title" required id="dl-title">
+                  <input id="dl-title" className="input w-48" required aria-required="true" value={dlForm.title} onChange={(e) => setDlForm({ ...dlForm, title: e.target.value })} />
+                </Field>
+                <Field label="Due" required id="dl-due">
+                  <input id="dl-due" className="input" type="datetime-local" required aria-required="true" value={dlForm.due_at} onChange={(e) => setDlForm({ ...dlForm, due_at: e.target.value })} />
+                </Field>
+                <Field label="Severity" id="dl-severity">
+                  <select id="dl-severity" className="input" value={dlForm.severity} onChange={(e) => setDlForm({ ...dlForm, severity: e.target.value })}>
                     <option>info</option><option>warning</option><option>critical</option>
-                  </select></div>
+                  </select>
+                </Field>
                 <button className="btn">Add</button>
               </form>
             </Card>
