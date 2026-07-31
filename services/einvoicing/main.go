@@ -71,7 +71,32 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// tenantGuard enforces object-level tenant isolation (audit fix H-3 BOLA).
+// It reports whether the request principal may access inv; when not, it
+// writes the response: cross-tenant access is a 404 (no existence oracle),
+// and an empty tenant_id claim against a tenant-owned invoice is a 403
+// (the check is never void for service tokens missing the tenant mapper).
+func tenantGuard(w http.ResponseWriter, r *http.Request, inv *CanonicalInvoice) bool {
+	claims, ok := devjwt.FromContext(r)
+	if !ok {
+		return true // no principal in context (internal/direct invocation)
+	}
+	if inv.TenantID == "" || inv.TenantID == claims.TenantID {
+		return true
+	}
+	if claims.TenantID == "" {
+		devjwt.Problem(w, http.StatusForbidden, "forbidden", "tenant_id claim required for this invoice")
+		return false
+	}
+	devjwt.Problem(w, http.StatusNotFound, "not found", "invoice "+inv.ID)
+	return false
+}
+
 func main() {
+	// M-4: prod refuses to boot on the silent QR dev-key default.
+	if err := validateQRKey(); err != nil {
+		log.Fatalf("qr: %v", err)
+	}
 	dir := dataDir()
 	store, err := NewInvoiceStore(filepath.Join(dir, "invoices.jsonl"))
 	if err != nil {
@@ -230,10 +255,7 @@ func (s *Server) handleGetInvoice(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
 		return
 	}
-	if claims, ok := devjwt.FromContext(r); ok && claims.TenantID != "" &&
-		inv.TenantID != "" && inv.TenantID != claims.TenantID {
-		// tenant isolation: never reveal existence across tenants (audit fix)
-		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
+	if !tenantGuard(w, r, inv) {
 		return
 	}
 	if r.URL.Query().Get("format") == "ubl" {
@@ -257,9 +279,7 @@ func (s *Server) handleGetQR(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
 		return
 	}
-	if claims, ok := devjwt.FromContext(r); ok && claims.TenantID != "" &&
-		inv.TenantID != "" && inv.TenantID != claims.TenantID {
-		devjwt.Problem(w, 404, "not found", "invoice "+r.PathValue("id"))
+	if !tenantGuard(w, r, inv) {
 		return
 	}
 	if inv.IRN == "" {
@@ -284,8 +304,12 @@ func (s *Server) handleGetQR(w http.ResponseWriter, r *http.Request) {
 // handlePreclear runs wf-mbs-preclearance for the invoice.
 func (s *Server) handlePreclear(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, ok := s.store.Get(id); !ok {
+	inv, ok := s.store.Get(id)
+	if !ok {
 		devjwt.Problem(w, 404, "not found", "invoice "+id)
+		return
+	}
+	if !tenantGuard(w, r, inv) { // BOLA: no cross-tenant pre-clearance (H-3)
 		return
 	}
 	run, err := s.runner.Run(r.Context(), s, "wf-mbs-preclearance", id)
@@ -293,7 +317,7 @@ func (s *Server) handlePreclear(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, map[string]any{"run": run, "error": err.Error()})
 		return
 	}
-	inv, _ := s.store.Get(id)
+	inv, _ = s.store.Get(id)
 	writeJSON(w, 200, map[string]any{"run": run, "invoice": inv})
 }
 
@@ -315,11 +339,19 @@ func (s *Server) handleB2CReport(w http.ResponseWriter, r *http.Request) {
 			devjwt.Problem(w, 404, "not found", "invoice "+req.InvoiceID)
 			return
 		}
+		if !tenantGuard(w, r, stored) { // BOLA: no cross-tenant B2C report (H-3)
+			return
+		}
 		inv = stored
 	} else if req.Invoice != nil {
 		inv = req.Invoice
 		inv.Normalise()
 		inv.InvoiceType = "B2C"
+		// bind the tenant server-side from the authenticated principal so a
+		// caller cannot plant an invoice into another tenant's namespace
+		if claims, ok := devjwt.FromContext(r); ok {
+			inv.TenantID = claims.TenantID
+		}
 		if inv.Status == "" {
 			inv.Status = "received"
 		}
