@@ -96,16 +96,56 @@ rules:
   then:
     rate_bps: 200
     narrate: WHT 2% on supply of goods and materials
-- id: wht.rate.construction.any
+- id: wht.rate.construction.core
   when:
     payment_type: construction
+    construction_type:
+      in: &id001
+      - roads
+      - bridges
+      - buildings
+      - power_plants
     beneficiary:
       in:
       - company
       - individual
   then:
     rate_bps: 200
-    narrate: WHT 2% on building/construction contracts
+    narrate: WHT 2% (resident) on construction of roads, bridges, buildings and power plants.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table)
+- id: wht.rate.construction.other
+  when:
+    payment_type: construction
+    construction_type: other
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% (resident) on any other form of construction and related activities.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; Nexia)
+- id: wht.rate.construction.non-resident.core
+  when:
+    payment_type: construction
+    construction_type:
+      in: *id001
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 500
+    precedence: 10
+    narrate: WHT 5% (non-resident) on construction of roads, bridges, buildings and power plants.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; Aluko & Oyebode)
+- id: wht.rate.construction.non-resident.other
+  when:
+    payment_type: construction
+    construction_type: other
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 1000
+    precedence: 10
+    narrate: WHT 10% (non-resident) on any other form of construction and related activities.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; Aluko & Oyebode)
 - id: wht.rate.services.company
   when:
     payment_type:
@@ -114,11 +154,20 @@ rules:
       - professional
       - technical
       - management
-      - services
     beneficiary: company
   then:
     rate_bps: 500
-    narrate: WHT 5% on services to a company
+    narrate: WHT 5% on consultancy/professional/technical/management services to a resident company.
+  citation: WHT Regs 2024, First Schedule
+- id: wht.rate.other-services.company
+  when:
+    payment_type: services
+    beneficiary: company
+  then:
+    rate_bps: 200
+    narrate: WHT 2% (resident) on supply or rendering of services OTHER THAN those specifically listed in the First Schedule
+      (generic "other services").
+  citation: WHT Regs 2024, First Schedule row "services other than those specifically listed" (KPMG; AELEX; Reanda)
 - id: wht.rate.services.individual
   when:
     payment_type:
@@ -127,11 +176,20 @@ rules:
       - professional
       - technical
       - management
-      - services
     beneficiary: individual
   then:
     rate_bps: 500
-    narrate: WHT 5% on services to an individual
+    narrate: WHT 5% on consultancy/professional/technical/management services to a resident individual.
+  citation: WHT Regs 2024, First Schedule
+- id: wht.rate.other-services.individual
+  when:
+    payment_type: services
+    beneficiary: individual
+  then:
+    rate_bps: 200
+    narrate: WHT 2% (resident) on supply or rendering of services OTHER THAN those specifically listed in the First Schedule
+      (generic "other services").
+  citation: WHT Regs 2024, First Schedule row "services other than those specifically listed" (KPMG; AELEX; Reanda)
 - id: wht.rate.commission.any
   when:
     payment_type: commission
@@ -147,8 +205,21 @@ rules:
     payment_type: directors_fees
     beneficiary: individual
   then:
-    rate_bps: 1000
-    narrate: WHT 10% on directors' fees (individual)
+    rate_bps: 1500
+    narrate: WHT 15% on directors' fees to a resident individual (raised from 10% by the WHT Regulations 2024).
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; UUBO; Aluko & Oyebode)
+  effective_from: '2025-01-01'
+- id: wht.rate.directors-fees.non-resident
+  when:
+    payment_type: directors_fees
+    beneficiary: individual
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 2000
+    precedence: 10
+    narrate: WHT 20% on directors' fees to a non-resident individual (final tax).
+  citation: WHT Regs 2024, First Schedule (KPMG rate table — Directors' fees non-corp 15%/20%; SHQ Legal)
+  effective_from: '2025-01-01'
 - id: wht.rate.non-resident.standard
   when:
     beneficiary_residence: non_resident
@@ -157,25 +228,61 @@ rules:
       - dividend
       - interest
       - rent
-      - royalty
       - consultancy
       - professional
       - technical
       - management
-      - services
       - commission
   then:
     rate_bps: 1000
     narrate: WHT 10% on payments to non-resident recipients (final tax; treaty relief may reduce)
   citation: WHT Regs 2024, First Schedule
+- id: wht.rate.royalty.non-resident-company
+  when:
+    payment_type: royalty
+    beneficiary: company
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 1000
+    precedence: 10
+    narrate: WHT 10% on royalties to a non-resident company (final tax; treaty relief may reduce).
+  citation: WHT Regs 2024, First Schedule (KPMG rate table)
+- id: wht.rate.royalty.non-resident-individual
+  when:
+    payment_type: royalty
+    beneficiary: individual
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 500
+    precedence: 20
+    narrate: WHT 5% on royalty payments to individuals, resident OR non-resident — the 10% non-resident rate does NOT apply
+      to individuals. Explicit precedence prevents the generic non-resident rule from clobbering the individual rate under
+      last-match-wins merge.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table — Royalty non-corp 5%/5%; UUBO; SHQ Legal)
+- id: wht.rate.other-services.non-resident
+  when:
+    payment_type: services
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 500
+    precedence: 10
+    narrate: WHT 5% (non-resident) on supply or rendering of services OTHER THAN those specifically listed.
+  citation: 'WHT Regs 2024, First Schedule row "services other than those specifically listed: 2%/5%" (KPMG)'
 - id: wht.no-tin.double-rate
   when:
     supplier_tin: null
     supplier_nin: null
+    payment_type:
+      not_in:
+      - dividend
+      - interest
+      - royalty
+      - rent
   then:
     rate_multiplier_bps: 20000
-    narrate: Rate is DOUBLED where the supplier has no TIN (and no NIN for individuals).
-  citation: WHT Regs 2024, reg. 5
+    narrate: 'Rate is DOUBLED where the supplier has no TIN (and no NIN for individuals). Scope: ACTIVE income only — the
+      double rate does NOT apply to passive income (dividends, interest, royalty, rent).'
+  citation: WHT Regs 2024, reg. 5; PwC Nigeria WHT summary (double rate not applicable to passive income, e.g. dividends)
 - id: wht.identity.nin-acceptable
   when:
     beneficiary: individual
@@ -187,14 +294,20 @@ rules:
   citation: WHT Regs 2024, reg. 5(2)
 - id: wht.small-co.carveout
   when:
-    beneficiary: company
-    supplier_size: small
-    supplier_monthly_turnover_kobo:
+    payer_size: small
+    payer_annual_turnover_kobo:
+      lte: 2500000000
+    transaction_month_value_kobo:
       lte: 200000000
+    supplier_tin:
+      present: true
   then:
     rate_bps: 0
-    narrate: No deduction on payments to a small company whose turnover is not more than N2,000,000 in the month of payment.
-  citation: WHT Regs 2024, reg. 4
+    precedence: 30
+    narrate: No deduction where the PAYER is a small company (turnover not exceeding N25,000,000 p.a. per the small-company
+      definition cross-referenced by the Regs), the transaction value does not exceed N2,000,000 in the relevant calendar
+      month, AND the supplier has a valid TIN. The carve-out is NEVER granted without a supplier TIN.
+  citation: WHT Regs 2024, reg. 4 (SHQ Legal; Andersen; PwC WHT summary — transaction value < N2m and vendor has valid TIN)
 - id: wht.exempt.franked-investment-income
   when:
     payment_type: dividend
@@ -238,17 +351,32 @@ rules:
   then:
     rate_bps: 0
     narrate: 'Exempt: telephone charges and airline tickets.'
-- id: wht.exempt.winnings
+- id: wht.rate.winnings.resident
   when:
     payment_type: winnings
     source:
-      in:
+      in: &id002
       - lottery
       - gaming
       - reality_show
   then:
-    rate_bps: 0
-    narrate: 'Exempt: winnings from lotteries/gaming (taxed under dedicated regimes).'
+    rate_bps: 500
+    narrate: WHT 5% (resident) on winnings from lottery, gaming and reality shows — NOT exempt; the former "taxed under dedicated
+      regimes" carve-out was removed.
+  citation: WHT Regs 2024, First Schedule (KPMG; AELEX; Andersen; SHQ Legal) — effective 1 Oct 2024
+  effective_from: '2024-10-01'
+- id: wht.rate.winnings.non-resident
+  when:
+    payment_type: winnings
+    source:
+      in: *id002
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 1500
+    precedence: 10
+    narrate: WHT 15% (non-resident) on winnings from lottery, gaming and reality shows.
+  citation: WHT Regs 2024, First Schedule (KPMG; AELEX; Andersen; SHQ Legal) — effective 1 Oct 2024
+  effective_from: '2024-10-01'
 - id: wht.exempt.lpg-cng
   when:
     payment_type: supply_of_goods_materials
@@ -284,4 +412,4 @@ rules:
 signed:
   algorithm: ed25519
   key_id: governance-board-2026
-  signature: 439eecf3def8eb248fbb82f8b1b24775158b08ab57ca6600cc87b48e7abdde4c77fdb0c0c2a0ef1d8bbc88e73c247420ab5675addb3a7ca0bcad2e88f1e94605
+  signature: 0e99c9cdaef4972bab9fd1294338d39e2e3737231568009a09549b32bfb03bdf4a909f7fdde18e683de7336f3e53ce26033e1113aeacfaf9b48a755c8da62e0c

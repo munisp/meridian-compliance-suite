@@ -78,6 +78,11 @@ def _match_map(base: str, conds: dict, got: Any, exists: bool) -> tuple[bool, st
         if op == "in":
             if not any(str(item) == str(got) for item in (w or [])):
                 return False, f"{base}={got} not in {w}"
+        elif op == "not_in":
+            # Canonical grammar extension (WHT Regs 2024 no-TIN rule scopes the
+            # double rate to active income via not_in passive types).
+            if any(str(item) == str(got) for item in (w or [])):
+                return False, f"{base}={got} in {w} (excluded)"
         elif op == "present":
             if (exists and got is not None) != bool(w):
                 return False, f"{base} present={exists and got is not None}"
@@ -105,7 +110,7 @@ def _match_cond(key: str, want: Any, ctx: dict) -> tuple[bool, str]:
         # Canonical grammar extensions (rule-packs repo SPEC §1.4):
         #   key: null            -> fact absent or null
         #   key: [a, b]          -> membership
-        #   key: {in|gte|lte|gt|lt|ne|present: ...} -> operator map
+        #   key: {in|not_in|gte|lte|gt|lt|ne|present: ...} -> operator map
         if want is None:
             ok = (not exists) or got is None
             return ok, "" if ok else f"{base} present (={got}), want null"

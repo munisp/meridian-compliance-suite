@@ -132,7 +132,7 @@ func matchCond(key string, want any, ctx map[string]any) (bool, string) {
 		// Canonical SPEC §1.4 grammar extensions (rule-packs repo):
 		//   key: null            -> fact absent or null
 		//   key: [a, b]          -> membership
-		//   key: {in|gte|lte|gt|lt|ne|present: ...} -> operator map
+		//   key: {in|not_in|gte|lte|gt|lt|ne|present: ...} -> operator map
 		switch w := want.(type) {
 		case nil:
 			if !ok || got == nil {
@@ -249,6 +249,15 @@ func matchMap(base string, conds map[string]any, got any, exists bool) (bool, st
 			}
 			if !found {
 				return false, fmt.Sprintf("%s=%v not in %v", base, got, w)
+			}
+		case "not_in":
+			// Canonical grammar extension (WHT Regs 2024 no-TIN rule scopes
+			// the double rate to active income via not_in passive types).
+			list, _ := w.([]any)
+			for _, item := range list {
+				if fmt.Sprint(item) == fmt.Sprint(got) {
+					return false, fmt.Sprintf("%s=%v in %v (excluded)", base, got, w)
+				}
 			}
 		case "present":
 			wantB, _ := w.(bool)
