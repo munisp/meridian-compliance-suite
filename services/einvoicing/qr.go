@@ -13,12 +13,15 @@ package main
 // is for local development only; production injects a KMS-managed key).
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
 )
 
 const qrDevKey = "meridian-dev-qr-key" // DEV ONLY — set QR_HMAC_KEY in prod
@@ -47,20 +50,50 @@ func validateQRKey() error {
 //	NRS1|<IRN>|<supplierTIN>|<payableKobo>|<yyyymmddhhmmss>|<hmac12>
 //
 // ≤ 106 bytes so it always fits a version-6 (41x41) EC-M symbol.
+// Dev-software wrapper; see QRPayloadE for the provider-backed path.
 func QRPayload(inv *CanonicalInvoice) (payload, signature string) {
-	ts := strings.NewReplacer("-", "", ":", "", "T", "", "Z", "").Replace(inv.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"))
-	payload = fmt.Sprintf("NRS1|%s|%s|%d|%s", inv.IRN, inv.Supplier.TIN, inv.PayableKobo, ts)
+	payload, signature, _ = QRPayloadE(nil, inv)
+	return payload, signature
+}
+
+// qrMAC computes the QR integrity code. A non-software provider routes the
+// HMAC to the HSM/KMS ("qr-hmac" keyID); otherwise the legacy QR_HMAC_KEY /
+// dev key is used (unchanged behaviour).
+func qrMAC(prov provider.SignerProvider, payload string) ([]byte, error) {
+	if prov != nil && prov.Mode() != "software" {
+		return prov.Sign(context.Background(), "qr-hmac", []byte(payload))
+	}
 	mac := hmac.New(sha256.New, qrKey())
 	mac.Write([]byte(payload))
-	signature = hex.EncodeToString(mac.Sum(nil))[:12]
-	return payload, signature
+	return mac.Sum(nil), nil
+}
+
+// QRPayloadE is QRPayload with an explicit key provider; HSM/KMS signing
+// errors are returned (fail-closed — no unsigned QR is ever produced).
+func QRPayloadE(prov provider.SignerProvider, inv *CanonicalInvoice) (payload, signature string, err error) {
+	ts := strings.NewReplacer("-", "", ":", "", "T", "", "Z", "").Replace(inv.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	payload = fmt.Sprintf("NRS1|%s|%s|%d|%s", inv.IRN, inv.Supplier.TIN, inv.PayableKobo, ts)
+	sum, err := qrMAC(prov, payload)
+	if err != nil {
+		return "", "", fmt.Errorf("qr sign: %w", err)
+	}
+	signature = hex.EncodeToString(sum)[:12]
+	return payload, signature, nil
 }
 
 // VerifyQRPayload re-computes the HMAC for a payload (without trailing sig).
 func VerifyQRPayload(payload, signature string) bool {
-	mac := hmac.New(sha256.New, qrKey())
-	mac.Write([]byte(payload))
-	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))[:12]), []byte(signature))
+	ok, _ := VerifyQRPayloadE(nil, payload, signature)
+	return ok
+}
+
+// VerifyQRPayloadE is VerifyQRPayload with an explicit key provider.
+func VerifyQRPayloadE(prov provider.SignerProvider, payload, signature string) (bool, error) {
+	sum, err := qrMAC(prov, payload)
+	if err != nil {
+		return false, err
+	}
+	return hmac.Equal([]byte(hex.EncodeToString(sum)[:12]), []byte(signature)), nil
 }
 
 // ---------------------------------------------------------------------------
