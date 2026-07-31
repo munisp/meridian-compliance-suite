@@ -128,6 +128,28 @@ func matchCond(key string, want any, ctx map[string]any) (bool, string) {
 		}
 	}
 	got, ok := ctx[base]
+	if op == "eq" {
+		// Canonical SPEC §1.4 grammar extensions (rule-packs repo):
+		//   key: null            -> fact absent or null
+		//   key: [a, b]          -> membership
+		//   key: {in|gte|lte|gt|lt|ne|present: ...} -> operator map
+		switch w := want.(type) {
+		case nil:
+			if !ok || got == nil {
+				return true, ""
+			}
+			return false, fmt.Sprintf("%s present (=%v), want null", base, got)
+		case []any:
+			for _, item := range w {
+				if fmt.Sprint(item) == fmt.Sprint(got) {
+					return true, ""
+				}
+			}
+			return false, fmt.Sprintf("%s=%v not in %v", base, got, w)
+		case map[string]any:
+			return matchMap(base, w, got, ok)
+		}
+	}
 	switch op {
 	case "exists":
 		wantB, _ := want.(bool)
@@ -175,6 +197,80 @@ func matchCond(key string, want any, ctx map[string]any) (bool, string) {
 		}
 		return true, ""
 	}
+}
+
+// cmpOrdered compares got/want for lt/lte/gt/gte: numeric when both parse as
+// float, else lexicographic (ISO dates YYYY-MM-DD compare correctly).
+func cmpOrdered(got, want any, op string) (bool, error) {
+	if got == nil {
+		return false, fmt.Errorf("nil value")
+	}
+	if gf, gok := toFloat(got); gok {
+		if wf, wok := toFloat(want); wok {
+			switch op {
+			case "lt":
+				return gf < wf, nil
+			case "lte":
+				return gf <= wf, nil
+			case "gt":
+				return gf > wf, nil
+			case "gte":
+				return gf >= wf, nil
+			}
+		}
+	}
+	gs, ws := fmt.Sprint(got), fmt.Sprint(want)
+	switch op {
+	case "lt":
+		return gs < ws, nil
+	case "lte":
+		return gs <= ws, nil
+	case "gt":
+		return gs > ws, nil
+	case "gte":
+		return gs >= ws, nil
+	}
+	return false, fmt.Errorf("unknown op %q", op)
+}
+
+// matchMap evaluates a canonical operator-map when-value, e.g.
+// {in: [...]}, {gte: X}, {present: true}, {ne: X}.
+func matchMap(base string, conds map[string]any, got any, exists bool) (bool, string) {
+	for op, w := range conds {
+		switch op {
+		case "in":
+			list, _ := w.([]any)
+			found := false
+			for _, item := range list {
+				if fmt.Sprint(item) == fmt.Sprint(got) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, fmt.Sprintf("%s=%v not in %v", base, got, w)
+			}
+		case "present":
+			wantB, _ := w.(bool)
+			if (exists && got != nil) != wantB {
+				return false, fmt.Sprintf("%s present=%v", base, exists && got != nil)
+			}
+		case "ne":
+			if fmt.Sprint(got) == fmt.Sprint(w) {
+				return false, fmt.Sprintf("%s=%v == %v", base, got, w)
+			}
+		case "lt", "lte", "gt", "gte":
+			m, err := cmpOrdered(got, w, op)
+			if err != nil || !m {
+				return false, fmt.Sprintf("%s=%v fails %s %v", base, got, op, w)
+			}
+		default:
+			if fmt.Sprint(got) != fmt.Sprint(w) {
+				return false, fmt.Sprintf("%s=%v != %v", base, got, w)
+			}
+		}
+	}
+	return true, ""
 }
 
 // Match reports whether all when-clauses hold for the context.
