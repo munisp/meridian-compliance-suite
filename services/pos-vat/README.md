@@ -33,6 +33,13 @@ GET /v1/workflows · POST /v1/workflows/{name}/run
   attribution modes incl. dual_shadow, spool/drain, variance, cert-run,
   dev TigerBeetle-semantics ledger (pending/post/void, float constraint),
   dev JWT auth, event envelope + file outbox.
+- REAL: runtime citation chain (LCE SPEC §5) — receipt responses carry
+  `citations` per computed VAT amount, resolved from the vendored coverage
+  matrix (`LCE_COVERAGE_DIR` overrides): standard-rated VAT cites the VAT Act
+  7.5% row (`vat-act-legacy:rate.7.5pct-from-2020-02-01`, citation_kind
+  primary); zero-rated medical/tuition cites NTA 2025 s.187
+  (`nta-2025:s.187.zero-rated-*`, citation_kind **secondary** until CTC
+  verification by the registry workstream).
 - SIMULATED: geo attribution uses embedded coarse state bboxes + LGA centroids
   when GEO_SVC_URL unset (production: geo-rs point-in-polygon); durable store
   is an embedded append-log (SQLite stand-in — build sandbox has no module
