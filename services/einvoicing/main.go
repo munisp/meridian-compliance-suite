@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/devjwt"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/envelope"
@@ -43,6 +44,7 @@ type Server struct {
 	store      *InvoiceStore
 	outbox     *envelope.Outbox
 	signer     *CSIDSigner
+	keyProv    provider.SignerProvider // nil in dev-software mode
 	validator  *Validator
 	router     *APPRouter
 	runner     *InprocRunner
@@ -137,12 +139,21 @@ func main() {
 			}
 		}
 	}()
-	signer, err := LoadCSID(dir)
+	// Key provider abstraction (KEY_PROVIDER): dev default is the software
+	// file/env keys; hsm|pkcs11|cloud-kms route CSID + QR signing to the
+	// HSM/KMS. A configured but unavailable provider is a hard startup
+	// failure (fail-closed — never a silent software fallback in prod).
+	keyProv, err := provider.NewFromEnv()
+	if err != nil {
+		log.Fatalf("key provider: %v", err)
+	}
+	signer, err := LoadCSIDWithProvider(dir, keyProv)
 	if err != nil {
 		log.Fatalf("csid: %v", err)
 	}
+	log.Printf("key provider: mode=%s csid_key=%s", keyProv.Mode(), signer.KeyID())
 	srv := &Server{
-		store: store, outbox: outbox, signer: signer,
+		store: store, outbox: outbox, signer: signer, keyProv: keyProv,
 		validator:  NewValidator(),
 		router:     NewAPPRouter(NewMBSClient()),
 		runner:     NewInprocRunner(),
@@ -286,7 +297,11 @@ func (s *Server) handleGetQR(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 409, "not cleared", "invoice has no IRN yet — run pre-clearance first")
 		return
 	}
-	payload, sig := QRPayload(inv)
+	payload, sig, err := QRPayloadE(s.keyProv, inv)
+	if err != nil {
+		devjwt.Problem(w, 500, "qr signing error", err.Error())
+		return
+	}
 	full := payload + "|" + sig
 	matrix, err := QRMatrix([]byte(full))
 	if err != nil {
