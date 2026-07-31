@@ -46,8 +46,13 @@ export function api(key: ServiceKey): AxiosInstance {
   return clients[key]!
 }
 
+// Money is kobo integers end-to-end; formatNGN (lib/format) is the single
+// sanctioned formatter (Meridian One §9). `kobo` stays as a null-safe alias.
+import { formatNGN } from './lib/format'
+export { formatNGN, formatNGNCompact, parseNGNToKobo, formatDateNG } from './lib/format'
+
 export const kobo = (k: number | undefined | null) =>
-  k == null ? '—' : `₦${(k / 100).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
+  k == null ? '—' : formatNGN(k)
 
 export const bps = (b: number | undefined | null) =>
   b == null ? '—' : `${(b / 100).toFixed(2)}%`
