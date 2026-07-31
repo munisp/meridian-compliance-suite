@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -21,8 +22,30 @@ type LedgerClient interface {
 	PendingTransfer(t LedgerTransfer) (string, error)
 	PostPending(pendingID string, amountKobo int64) (string, error)
 	VoidPending(pendingID string) error
+	// GetTransfer reports a transfer's lifecycle state (F5 saga recovery).
+	GetTransfer(id string) (*LedgerTransferState, error)
 	Balance(accountID string) (*LedgerBalance, error)
 	Mode() string
+}
+
+// LedgerTransferState is the lifecycle view of a transfer for saga resume.
+type LedgerTransferState struct {
+	ID      string `json:"id"`
+	Pending bool   `json:"pending"`
+	Posted  bool   `json:"posted"`
+	Voided  bool   `json:"voided"`
+}
+
+// DeterministicTransferID derives a stable 128-bit id from a seed so
+// retried settlement legs replay instead of double-posting.
+func DeterministicTransferID(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
+	return fmt.Sprintf("%x", sum[:16])
+}
+
+func sameLedgerTransfer(a, b LedgerTransfer) bool {
+	return a.DebitAccountID == b.DebitAccountID && a.CreditAccountID == b.CreditAccountID &&
+		a.AmountKobo == b.AmountKobo && a.Ledger == b.Ledger && a.Code == b.Code
 }
 
 // Account id = 128-bit: high 64 namespace code, low 64 entity serial (SPEC §1.5).
@@ -132,6 +155,19 @@ func (h *HTTPLedger) VoidPending(pendingID string) error {
 	return h.do("POST", "/v1/transfers/"+pendingID+"/void", map[string]any{}, nil)
 }
 
+// GetTransfer reports a transfer's lifecycle state: GET /v1/transfers/{id}.
+func (h *HTTPLedger) GetTransfer(id string) (*LedgerTransferState, error) {
+	var out struct {
+		ID      string `json:"id"`
+		Pending bool   `json:"pending"`
+		Voided  bool   `json:"voided"`
+	}
+	if err := h.do("GET", "/v1/transfers/"+id, nil, &out); err != nil {
+		return nil, err
+	}
+	return &LedgerTransferState{ID: out.ID, Pending: out.Pending, Posted: !out.Pending && !out.Voided, Voided: out.Voided}, nil
+}
+
 func (h *HTTPLedger) Balance(accountID string) (*LedgerBalance, error) {
 	var out LedgerBalance
 	err := h.do("GET", "/v1/accounts/"+accountID+"/balance", nil, &out)
@@ -206,6 +242,14 @@ func (d *DevLedger) Transfer(t LedgerTransfer) (string, error) {
 func (d *DevLedger) PendingTransfer(t LedgerTransfer) (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if t.ID != "" {
+		if existing, ok := d.transfers[t.ID]; ok {
+			if existing.pending && sameLedgerTransfer(existing.LedgerTransfer, t) {
+				return t.ID, nil // idempotent replay (F5)
+			}
+			return "", errors.New("transfer id exists with different parameters or state")
+		}
+	}
 	if err := d.checkAccounts(t); err != nil {
 		return "", err
 	}
@@ -282,6 +326,17 @@ func (d *DevLedger) checkFloat(a *devAccount, amount int64) error {
 func (d *DevLedger) apply(t LedgerTransfer) {
 	d.accounts[t.DebitAccountID].debitsPosted += t.AmountKobo
 	d.accounts[t.CreditAccountID].creditsPosted += t.AmountKobo
+}
+
+// GetTransfer reports a transfer's lifecycle state (F5 saga recovery).
+func (d *DevLedger) GetTransfer(id string) (*LedgerTransferState, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	tr, ok := d.transfers[id]
+	if !ok {
+		return nil, errors.New("transfer not found")
+	}
+	return &LedgerTransferState{ID: id, Pending: tr.pending, Posted: tr.posted, Voided: tr.voided}, nil
 }
 
 func (d *DevLedger) Balance(accountID string) (*LedgerBalance, error) {

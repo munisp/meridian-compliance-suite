@@ -69,6 +69,7 @@ class EvaluateIn(BaseModel):
     goods_imported: bool = False
     vendor_name: str = ""
     tenant_id: str = ""
+    idempotency_key: str = ""  # dedup retried POSTs (F3b)
     record: bool = False  # also persist as a ledger deduction
 
 
@@ -85,7 +86,18 @@ def evaluate(body: EvaluateIn, principal=AuthDep):
 
 
 def _persist_deduction(body: EvaluateIn, result: dict) -> str:
-    did = f"ded-{uuid.uuid4().hex[:12]}"
+    # F3b: caller idempotency key -> deterministic deduction id; a retried
+    # POST replays the original deduction instead of double-counting it
+    # into the next remittance run.
+    if getattr(body, "idempotency_key", ""):
+        import hashlib
+        did = "ded-" + hashlib.sha256(
+            f"idem:{body.idempotency_key}".encode()).hexdigest()[:12]
+        with db.session() as sess:
+            if sess.get(db.Deduction, did) is not None:
+                return did  # idempotent replay
+    else:
+        did = f"ded-{uuid.uuid4().hex[:12]}"
     date = result.get("deduction_date") or db.now()[:10]
     with db.session() as sess:
         sess.add(db.Deduction(
