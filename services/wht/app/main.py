@@ -59,13 +59,23 @@ class EvaluateIn(BaseModel):
     beneficiary: str = Field("company", description="company|individual")
     amount_kobo: int = Field(..., gt=0)
     supplier_monthly_turnover_kobo: Optional[int] = Field(
-        None, description="supplier's ACTUAL monthly turnover (small-company carve-out; never defaulted from amount)")
-    supplier_size: str = Field("", description="small|medium|large (carve-out needs 'small')")
+        None, description="LEGACY supplier-side fact (pre-audit pack); the carve-out now keys on the PAYER")
+    supplier_size: str = Field("", description="LEGACY supplier-side fact (pre-audit pack)")
+    payer_size: str = Field("", description="small|medium|large — small-company carve-out requires 'small' (payer-side, Reg 4)")
+    payer_is_small_company: bool = Field(False, description="alias for payer_size=small")
+    payer_annual_turnover_kobo: Optional[int] = Field(
+        None, description="payer's annual turnover (small company <= N25m p.a. = 2,500,000,000 kobo)")
+    transaction_month_value_kobo: Optional[int] = Field(
+        None, description="transaction value within the calendar month (carve-out cap N2m = 200,000,000 kobo)")
     beneficiary_residence: str = Field("", description="resident|non_resident")
+    source: str = Field("", description="winnings source: lottery|gaming|reality_show")
+    construction_type: str = Field("", description="roads|bridges|buildings|power_plants|other")
+    tax: str = Field("", description="tax discriminator for multi-tax packs (default WHT)")
     supplier_tin: str = ""
     nin: str = ""
     payment_date: str = ""
     settlement_date: str = ""
+    date: str = Field("", description="explicit transaction date fallback (ISO YYYY-MM-DD)")
     via_direct_debit: bool = False
     via_broker: bool = False
     supplier_is_manufacturer: bool = False
