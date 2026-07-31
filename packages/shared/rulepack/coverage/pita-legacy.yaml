@@ -1,0 +1,58 @@
+# Coverage matrix — PITA (pre-2026 PAYE/PIT legacy regime)
+# Legacy regimes stay loadable forever (SPEC-LCE §4.5); statute-level effective_to
+# marks the end of the regime, rules remain for back-period audits.
+statute:
+  id: pita-legacy
+  title: Personal Income Tax Act (as amended) — legacy regime to 2025-12-31
+  jurisdiction: NG-FED
+  effective_from: '2011-06-14'        # PITA (Amendment) Act 2011 bands
+  effective_to: '2025-12-31'
+  gazette: Personal Income Tax (Amendment) Act 2011
+  subject_to_regazette: false
+
+sections:
+  - section_id: bands.7-to-24
+    title: Graduated bands 7% / 11% / 15% / 19% / 21% / 24%
+    implementing_rules:
+      - rp-paye-pitra-legacy:paye.band.1
+      - rp-paye-pitra-legacy:paye.band.2
+      - rp-paye-pitra-legacy:paye.band.3
+      - rp-paye-pitra-legacy:paye.band.4
+      - rp-paye-pitra-legacy:paye.band.5
+      - rp-paye-pitra-legacy:paye.band.6
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: cra.consolidated-relief
+    title: Consolidated relief allowance — higher of N200,000 or 1% of gross income, plus 20%
+    implementing_rules:
+      - rp-paye-pitra-legacy:paye.cra.consolidated-relief
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: exempt-deductions
+    title: Tax-exempt deductions (pension, NHIS, life assurance, etc.)
+    implementing_rules:
+      - rp-paye-pitra-legacy:paye.deductions.exempt
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: minimum-tax-1pct
+    title: Minimum tax — 1% of gross income
+    implementing_rules:
+      - rp-paye-pitra-legacy:paye.minimum-tax
+      - rp-paye-pitra-legacy:paye.minimum-wage-exempt
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: paye-remit-10th
+    title: PAYE remittance by the 10th day of the following month
+    implementing_rules:
+      - rp-paye-pitra-legacy:paye.remit.deadline
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary

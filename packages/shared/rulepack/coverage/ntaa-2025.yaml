@@ -1,0 +1,88 @@
+# Coverage matrix — Nigeria Tax Administration Act 2025
+statute:
+  id: ntaa-2025
+  title: Nigeria Tax Administration Act 2025
+  jurisdiction: NG-FED
+  effective_from: '2026-01-01'
+  gazette: Nigeria Tax Administration Act 2025 (signed 26 June 2025; gazette CTC pending)
+  subject_to_regazette: true
+
+sections:
+  - section_id: s.147.vat-registration-threshold
+    title: VAT registration threshold — turnover ABOVE N100m registers ("N100m or less" stays exempt; gt not gte)
+    implementing_rules:
+      - rp-vat-rates:vat.registration.threshold
+      - rp-turnover-bands:band.exit.register
+      - rp-exemption-nta:exempt.small-company
+    conformance_tests:
+      - test_t8_exactly_100m_not_required_to_register
+      - test_t8_consistent_with_exemption_pack_and_band_exit
+      - test_presumptive_exit_aligns_with_vat_registration
+      - ntaa.registration-threshold.exactly-100m-exempt
+      - ntaa.registration-threshold.above-100m-registers
+    status: IMPLEMENTED
+    citation_url: https://www.forvismazars.com/ng/en/insights/nigeria-tax-reform-acts-2025
+    citation_kind: secondary
+    notes: Audit finding — 'N100,000,000 or less' is exempt; gte was the audit bug (T8).
+
+  - section_id: penalties.fiscalisation-nonuse
+    title: Non-use of fiscalisation system — N200,000 + 100% of tax due + MPR interest
+    implementing_rules:
+      - rp-ntaa-penalties:pen.fiscalisation.nonuse
+    conformance_tests:
+      - test_t9_fiscalisation_and_access_refusal_are_distinct
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: penalties.access-refusal
+    title: Refusal of technology access — N1,000,000 day 1 + N10,000/day
+    implementing_rules:
+      - rp-ntaa-penalties:pen.technology.access-refusal
+    conformance_tests:
+      - test_t9_fiscalisation_and_access_refusal_are_distinct
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: appeals.20pct-deposit
+    title: Appeal deposit — 20% of disputed tax before TAT hearing
+    implementing_rules:
+      - rp-deposit-20pct:deposit.amount
+      - rp-deposit-20pct:deposit.timeline
+      - rp-deposit-20pct:deposit.refund.win
+      - rp-deposit-20pct:deposit.forfeit.lose
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: ombud
+    title: Office of the Tax Ombud — jurisdiction, intake, resolution targets
+    implementing_rules:
+      - rp-procedure-ombud:ombud.jurisdiction
+      - rp-procedure-ombud:ombud.intake.deadline
+      - rp-procedure-ombud:ombud.resolution.target
+      - rp-procedure-ombud:ombud.powers
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: tat-procedure
+    title: Tax Appeal Tribunal procedure — notice windows, deposit prerequisite, decision timelines
+    implementing_rules:
+      - rp-procedure-tat:tat.notice.window
+      - rp-procedure-tat:tat.deposit.prereq
+      - rp-procedure-tat:tat.decision.timeline
+      - rp-procedure-tat:tat.escalation
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: attribution-sharing-formula
+    title: VAT attribution sharing formula — 30% consumption factor and state coefficients
+    implementing_rules:
+      - rp-attribution-formula:attr.formula.state-share
+      - rp-attribution-formula:attr.consumption.index
+    conformance_tests: []
+    status: PARTIAL
+    citation_kind: secondary
+    notes: 30% consumption factor implemented; state sharing coefficients are
+      regazette-flagged pending the NTAA attribution regulations (CTC).

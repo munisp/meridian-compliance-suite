@@ -1,0 +1,56 @@
+# Coverage matrix — VAT Act + Finance Act 2019 (pre-2026 VAT)
+statute:
+  id: vat-act-legacy
+  title: Value Added Tax Act (as amended by Finance Act 2019) — legacy regime to 2025-12-31
+  jurisdiction: NG-FED
+  effective_from: '1994-01-01'
+  effective_to: '2025-12-31'
+  gazette: VAT Act Cap V1 LFN 2004; Finance Act 2019
+  subject_to_regazette: false
+
+sections:
+  - section_id: rate.5pct-pre-2020
+    title: VAT 5% for back periods before 1 February 2020
+    implementing_rules:
+      - rp-vat-rates:vat.rate.standard-legacy
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: rate.7.5pct-from-2020-02-01
+    title: VAT 7.5% from 1 February 2020 (Finance Act 2019)
+    implementing_rules:
+      - rp-vat-rates:vat.rate.standard
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: exempt-basket.legacy
+    title: Legacy exempt basket — medical and educational services exempt pre-2026
+    implementing_rules:
+      - rp-vat-exempt-basket:vat.exempt.medical-services-legacy
+      - rp-vat-exempt-basket:vat.exempt.education-services-legacy
+      - rp-vat-exempt-basket:vat.exempt.shared-transport
+      - rp-vat-exempt-basket:vat.exempt.plays-performance
+      - rp-vat-exempt-basket:vat.exempt.real-property
+      - rp-vat-exempt-basket:vat.exempt.money-securities
+      - rp-vat-exempt-basket:vat.exempt.humanitarian
+      - rp-vat-exempt-basket:vat.exempt.exported-services-legacy
+    conformance_tests:
+      - test_t6_medical_and_tuition_zero_rated_from_2026
+      - test_t6_legacy_exempt_rules_expire_2025_12_31
+      - vat.baskets.medical-exempt-2025
+      - vat.baskets.medical-exempt-boundary-2025-12-31
+      - vat.baskets.tuition-exempt-2025
+      - vat.baskets.tuition-exempt-boundary-2025-12-31
+    status: IMPLEMENTED
+    citation_kind: primary
+
+  - section_id: threshold.legacy-25m
+    title: Registration threshold N25m taxable supplies (pre-2026)
+    implementing_rules:
+      - rp-vat-rates:vat.registration.threshold-legacy
+    conformance_tests:
+      - test_vat_threshold_date_split
+    status: IMPLEMENTED
+    citation_kind: primary
