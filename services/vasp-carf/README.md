@@ -31,3 +31,15 @@ GET /v1/gates · POST /v1/gates/{id}/flip (admin) · POST /v1/duties/evaluate ·
 - SIMULATED: transmit performs no real OECD channel I/O (dev: status flip +
   envelope log); reg-watch consumed via API when configured, local gate file
   otherwise; durable store is embedded append-log (SQLite stand-in).
+
+
+## Auth (fail-closed contract)
+
+`AUTH_MODE=dev` (default): HS256 Bearer tokens (`MERIDIAN_DEV_JWT_SECRET`)
+plus an allowlisted `X-Dev-Role` header (`admin|operator|auditor`).
+`AUTH_MODE=keycloak`: RS256 Bearer tokens verified against the realm JWKS
+(`KEYCLOAK_ISSUER` / `KEYCLOAK_AUDIENCE` / `KEYCLOAK_JWKS_URL`; iss/aud/exp
+enforced, keys cached with refresh-on-unknown-kid). **Fail closed:** a
+keycloak deployment missing its OIDC configuration refuses to start — there
+is no silent fallback to dev auth, and `X-Dev-Role` is ignored in keycloak
+mode.
