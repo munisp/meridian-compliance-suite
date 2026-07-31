@@ -129,6 +129,76 @@ func (st *Store) Recons() []*ReconRecord {
 	return out
 }
 
+// ---------- settled_periods: settlement marker table (F5) ----------
+// Checked BEFORE any ledger posting: a re-run of an already-settled
+// (tenant, period) is a 200 no-op replay; a "pending" marker means a
+// crashed saga that the handler resumes from the persisted transfer ids.
+
+type SettledPeriod struct {
+	TenantID         string `json:"tenant_id"`
+	Period           string `json:"period"`
+	FederalKobo      int64  `json:"federal_kobo"`
+	StateKobo        int64  `json:"state_kobo"`
+	FederalPendingID string `json:"federal_pending_id,omitempty"`
+	StatePendingID   string `json:"state_pending_id,omitempty"`
+	Status           string `json:"status"` // pending|settled|failed
+	ReconID          string `json:"recon_id,omitempty"`
+	FailReason       string `json:"fail_reason,omitempty"`
+	UpdatedAt        string `json:"updated_at"`
+}
+
+var settledPeriods = struct {
+	mu sync.RWMutex
+	m  map[string]*SettledPeriod
+}{m: map[string]*SettledPeriod{}}
+
+func settledKey(tenant, period string) string { return tenant + "|" + period }
+
+func (st *Store) loadSettledPeriods() {
+	f, err := os.Open(filepath.Join(st.dir, "settled_periods.log"))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		var sp SettledPeriod
+		if json.Unmarshal(sc.Bytes(), &sp) == nil {
+			settledPeriods.m[settledKey(sp.TenantID, sp.Period)] = &sp
+		}
+	}
+}
+
+// GetSettledPeriod returns the settlement marker for (tenant, period), or nil.
+func (st *Store) GetSettledPeriod(tenant, period string) *SettledPeriod {
+	settledPeriods.mu.RLock()
+	defer settledPeriods.mu.RUnlock()
+	if sp, ok := settledPeriods.m[settledKey(tenant, period)]; ok {
+		cp := *sp
+		return &cp
+	}
+	return nil
+}
+
+// SaveSettledPeriod upserts the marker and appends it to the durable log.
+func (st *Store) SaveSettledPeriod(sp *SettledPeriod) error {
+	settledPeriods.mu.Lock()
+	settledPeriods.m[settledKey(sp.TenantID, sp.Period)] = sp
+	settledPeriods.mu.Unlock()
+	f, err := os.OpenFile(filepath.Join(st.dir, "settled_periods.log"),
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	b, _ := json.Marshal(sp)
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
 // ---------- Spool: store-and-forward for offline terminals ----------
 
 type SpoolEntry struct {

@@ -85,7 +85,14 @@ def wf_wht_remit_schedule(period: str = "", tenant_id: str = "") -> WorkflowRun:
         total = sum(d["wht_kobo"] for d in state["deductions"])
         vendors = {d["vendor_tin"] for d in state["deductions"]}
         state["total_kobo"] = total
-        state["batch_id"] = f"remit-{(period or 'all')}-{uuid.uuid4().hex[:8]}"
+        # Deterministic batch id (F3): a retried run over the same deduction
+        # set regenerates the SAME batch — credits, files and remit_batch
+        # markers all key off it, so retries converge instead of forking.
+        import hashlib
+        ded_key = ",".join(sorted(d["id"] for d in state["deductions"]))
+        state["batch_id"] = (
+            f"remit-{(period or 'all')}-"
+            f"{hashlib.sha256(ded_key.encode()).hexdigest()[:8]}")
         return f"{len(vendors)} vendors, total {total} kobo"
 
     def generate_files():
@@ -96,34 +103,66 @@ def wf_wht_remit_schedule(period: str = "", tenant_id: str = "") -> WorkflowRun:
                                             state["deductions"], per)
         return f"CSV {len(state['csv'])}B, XML {len(state['xml'])}B"
 
-    def post_credits():
-        with db.session() as sess:
-            for d in state["deductions"]:
-                sess.add(db.Credit(
-                    id=f"cr-{uuid.uuid4().hex[:12]}",
-                    vendor_tin=d["vendor_tin"], credit_kobo=d["wht_kobo"],
-                    source=d["id"], period=d["period"],
-                    note=f"WHT credit from {state['batch_id']}",
-                    created_at=db.now()))
-            sess.commit()
-        return f"posted {len(state['deductions'])} vendor credits"
+    def post_credits_and_mark_remitted():
+        """F3: vendor credits + remitted flags in ONE database transaction
+        (audit Flow 3: they were separate transactions, and credit ids were
+        random — a retry after a mid-run crash double-posted credits).
 
-    def mark_remitted():
+        Idempotency: credit id is deterministic per (batch, deduction) and
+        existing credits are skipped (dedup store = the credits table
+        itself). A crash anywhere before the commit rolls the whole unit
+        back; a retry re-runs the unit and converges to exactly one credit
+        per deduction."""
+        posted = skipped = 0
         with db.session() as sess:
             for d in state["deductions"]:
+                cid = f"cr-{state['batch_id']}-{d['id']}"
+                # dedup: deterministic credit id per run AND a source-index
+                # check (a credit already posted for this deduction by ANY
+                # earlier run/crash-orphaned batch is never reposted)
+                from sqlalchemy import select as _select
+                existing = sess.get(db.Credit, cid) or sess.execute(
+                    _select(db.Credit).where(db.Credit.source == d["id"])).scalars().first()
+                if existing is None:
+                    sess.add(db.Credit(
+                        id=cid,
+                        vendor_tin=d["vendor_tin"], credit_kobo=d["wht_kobo"],
+                        source=d["id"], period=d["period"],
+                        note=f"WHT credit from {state['batch_id']}",
+                        created_at=db.now()))
+                    posted += 1
+                else:
+                    skipped += 1  # replay: already posted by an earlier attempt
                 row = sess.get(db.Deduction, d["id"])
                 if row is not None:
                     row.remitted = True
                     row.remit_batch = state["batch_id"]
-            sess.commit()
-        return "deductions marked remitted"
+            sess.commit()  # single atomic commit: credits + remitted flags
+        state["credits_posted"] = posted
+        state["credits_deduped"] = skipped
+        return f"posted {posted} vendor credits ({skipped} deduped), deductions marked remitted"
+
+    def reconcile():
+        """Post-condition (audit Flow 3e): Σ(credits for this batch) must
+        equal Σ(deductions marked remitted in this batch)."""
+        with db.session() as sess:
+            from sqlalchemy import func, select
+            # Σ credits for THIS deduction set (by source id — dedup-safe)
+            # must equal Σ deductions marked remitted in this run.
+            credits_total = int(sess.execute(
+                select(func.coalesce(func.sum(db.Credit.credit_kobo), 0))
+                .where(db.Credit.source.in_([d["id"] for d in state["deductions"]]))).scalar_one())
+        if credits_total != state["total_kobo"]:
+            raise RuntimeError(
+                f"recon break: credits {credits_total} != deductions {state['total_kobo']}")
+        return f"reconciled: credits == deductions == {credits_total} kobo"
 
     try:
         _retry(run, "collect", collect)
         _retry(run, "aggregate", aggregate)
         _retry(run, "generate-files", generate_files)
-        _retry(run, "post-credits", post_credits)
-        _retry(run, "mark-remitted", mark_remitted)
+        _retry(run, "post-credits-and-mark-remitted", post_credits_and_mark_remitted)
+        _retry(run, "reconcile", reconcile)
         run.status = "completed"
         run.result = {"batch_id": state["batch_id"],
                       "total_wht_kobo": state["total_kobo"],
