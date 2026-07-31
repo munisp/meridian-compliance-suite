@@ -1,0 +1,6 @@
+{
+  "app": { "title": "Meridian", "subtitle": "Compliance Portal", "tagline": "Nigeria Revenue Service · TaxTech compliance plane" },
+  "nav": { "overview": "Overview", "einvoicing": "E-Invoicing", "wht": "WHT", "etr": "ETR (Pillar Two)", "vasp": "VASP / CARF", "pos": "Retailer POS", "cases": "Practitioner" },
+  "auth": { "signOut": "Sign out", "signIn": "Sign in" },
+  "lang": { "label": "Language", "en": "English", "ha": "Hausa", "yo": "Yorùbá", "ig": "Igbo" }
+}

@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { api, kobo } from '../api'
-import { Card, Empty, ErrorNote, PageTitle, Status } from '../components/ui'
+import { Card, Empty, ErrorNote, Field, MoneyInput, PageTitle } from '../components/ui'
 
 export default function Wht() {
-  const [form, setForm] = useState({ payment_type: 'dividend', beneficiary: 'company', amount: '5000000', vendor_tin: '' })
+  const [form, setForm] = useState({ payment_type: 'dividend', beneficiary: 'company', vendor_tin: '' })
+  const [amountKobo, setAmountKobo] = useState<number | null>(500_000_000)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<any>(null)
   const [busy, setBusy] = useState(false)
@@ -15,7 +16,7 @@ export default function Wht() {
     try {
       const res = await api('wht').post('/v1/wht/evaluate', {
         payment_type: form.payment_type, beneficiary: form.beneficiary,
-        amount_kobo: Math.round(parseFloat(form.amount) * 100), supplier_tin: form.vendor_tin || undefined,
+        amount_kobo: amountKobo ?? 0, supplier_tin: form.vendor_tin || undefined,
       })
       setResult(res.data)
     } catch (err) { setError(err) } finally { setBusy(false) }
@@ -44,20 +45,29 @@ export default function Wht() {
         <Card title="Evaluate withholding">
           <form onSubmit={evaluate} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="label">Payment type</label>
-                <select className="input" value={form.payment_type} onChange={(e) => setForm({ ...form, payment_type: e.target.value })}>
-                  {['dividend', 'interest', 'royalty', 'rent', 'services', 'construction', 'supply_of_goods_materials', 'commission', 'directors_fees'].map((p) => <option key={p}>{p}</option>)}
-                </select></div>
-              <div><label className="label">Beneficiary</label>
-                <select className="input" value={form.beneficiary} onChange={(e) => setForm({ ...form, beneficiary: e.target.value })}>
-                  <option value="company">company</option><option value="individual">individual</option>
-                </select></div>
+              <Field label="Payment type">
+                {(id) => (
+                  <select id={id} className="input" value={form.payment_type} onChange={(e) => setForm({ ...form, payment_type: e.target.value })}>
+                    {['dividend', 'interest', 'royalty', 'rent', 'services', 'construction', 'supply_of_goods_materials', 'commission', 'directors_fees'].map((p) => <option key={p}>{p}</option>)}
+                  </select>)}
+              </Field>
+              <Field label="Beneficiary">
+                {(id) => (
+                  <select id={id} className="input" value={form.beneficiary} onChange={(e) => setForm({ ...form, beneficiary: e.target.value })}>
+                    <option value="company">company</option><option value="individual">individual</option>
+                  </select>)}
+              </Field>
             </div>
-            <div><label className="label">Amount (NGN)</label>
-              <input className="input" type="number" min="1" value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
-            <div><label className="label">Vendor TIN (optional — no-TIN doubles rate)</label>
-              <input className="input" value={form.vendor_tin} onChange={(e) => setForm({ ...form, vendor_tin: e.target.value })} /></div>
+            <Field label="Amount (NGN)" required>
+              {(id, describedBy) => (
+                <MoneyInput id={id} valueKobo={amountKobo} onChangeKobo={setAmountKobo}
+                  aria-describedby={describedBy} aria-required />)}
+            </Field>
+            <Field label="Vendor TIN" hint="Optional — no-TIN doubles the rate">
+              {(id, describedBy) => (
+                <input id={id} className="input font-mono" value={form.vendor_tin}
+                  onChange={(e) => setForm({ ...form, vendor_tin: e.target.value })} aria-describedby={describedBy} />)}
+            </Field>
             <button className="btn" disabled={busy}>{busy ? 'Evaluating…' : 'Evaluate'}</button>
           </form>
           {error && <div className="mt-3"><ErrorNote error={error} /></div>}
@@ -76,7 +86,7 @@ export default function Wht() {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Card title="Vendor WHT credits" actions={<button className="btn-ghost" onClick={loadCredits} disabled={!form.vendor_tin}>Load</button>}>
-          {credits ? <pre className="text-xs bg-sand-50 rounded-lg p-3 overflow-auto">{JSON.stringify(credits, null, 2)}</pre>
+          {credits ? <pre className="text-xs bg-neutral-50 rounded-lg p-3 overflow-auto">{JSON.stringify(credits, null, 2)}</pre>
             : <Empty>Enter a vendor TIN and load their credit ledger.</Empty>}
         </Card>
         <Card title="Remittance file" actions={<button className="btn-ghost" onClick={buildRemit}>Generate</button>}>
@@ -97,7 +107,7 @@ export default function Wht() {
 function Row({ k, v, mono }: { k: string; v: any; mono?: boolean }) {
   return (
     <div className="flex justify-between gap-4">
-      <span className="text-sand-500 shrink-0">{k}</span>
+      <span className="text-stone-600 shrink-0">{k}</span>
       <span className={mono ? "text-right break-all font-mono text-xs" : "text-right break-all"}>{v ?? '—'}</span>
     </div>
   )

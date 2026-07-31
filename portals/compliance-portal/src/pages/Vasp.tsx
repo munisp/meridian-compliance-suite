@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { api, kobo } from '../api'
-import { Card, Empty, ErrorNote, PageTitle, Status } from '../components/ui'
+import { Card, Empty, ErrorNote, Field, MoneyInput, PageTitle, Status } from '../components/ui'
 
 export default function Vasp() {
   const [gates, setGates] = useState<Record<string, any>>({})
-  const [form, setForm] = useState({ user_hash: 'user-001', asset: 'BTC', side: 'buy', qty: '1', price: '60000000' })
+  const [form, setForm] = useState({ user_hash: 'user-001', asset: 'BTC', side: 'buy', qty: '1' })
+  const [priceKobo, setPriceKobo] = useState<number | null>(6_000_000_000)
   const [method, setMethod] = useState('fifo')
   const [msg, setMsg] = useState<any>(null)
   const [basis, setBasis] = useState<any>(null)
@@ -27,7 +28,7 @@ export default function Vasp() {
       const res = await api('vasp').post(`/v1/trades?method=${method}`, {
         tenant_id: tenant, user_hash: form.user_hash, asset: form.asset, side: form.side,
         qty_milli: Math.round(parseFloat(form.qty) * 1000),
-        price_kobo: Math.round(parseFloat(form.price) * 100),
+        price_kobo: priceKobo ?? 0,
       })
       setMsg(res.data)
     } catch (err) { setError(err) }
@@ -62,7 +63,7 @@ export default function Vasp() {
       <PageTitle title="VASP / CARF Console" sub="Trade ingest · FIFO/WAC cost basis · ring-fence · OECD CARF builder with gate enforcement (T10)" />
 
       <div className={`rounded-xl border px-4 py-3 text-sm flex items-center justify-between ${
-        transmitClosed ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-moss-500/40 bg-moss-500/10 text-moss-700'}`}>
+        transmitClosed ? 'border-warning-strong/40 bg-warning text-warning-on' : 'border-success-strong/40 bg-success text-success-on'}`}>
         <div>
           <span className="font-medium">CARF transmission gate: {transmitClosed ? 'CLOSED' : 'OPEN'}</span>
           <span className="ml-2 text-xs">
@@ -78,26 +79,33 @@ export default function Vasp() {
         <Card title="Ingest trade">
           <form onSubmit={ingest} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="label">User (pseudonym)</label>
-                <input className="input" value={form.user_hash} onChange={(e) => setForm({ ...form, user_hash: e.target.value })} /></div>
-              <div><label className="label">Asset</label>
-                <select className="input" value={form.asset} onChange={(e) => setForm({ ...form, asset: e.target.value })}>
+              <Field label="User (pseudonym)" id="vasp-user">
+                <input id="vasp-user" className="input" value={form.user_hash} onChange={(e) => setForm({ ...form, user_hash: e.target.value })} />
+              </Field>
+              <Field label="Asset" id="vasp-asset">
+                <select id="vasp-asset" className="input" value={form.asset} onChange={(e) => setForm({ ...form, asset: e.target.value })}>
                   {['BTC', 'ETH', 'USDT', 'SOL'].map((a) => <option key={a}>{a}</option>)}
-                </select></div>
-              <div><label className="label">Side</label>
-                <select className="input" value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value })}>
+                </select>
+              </Field>
+              <Field label="Side" id="vasp-side">
+                <select id="vasp-side" className="input" value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value })}>
                   <option>buy</option><option>sell</option>
-                </select></div>
-              <div><label className="label">Method</label>
-                <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
+                </select>
+              </Field>
+              <Field label="Method" id="vasp-method">
+                <select id="vasp-method" className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
                   <option value="fifo">FIFO</option><option value="wac">weighted average</option>
-                </select></div>
-              <div><label className="label">Qty (asset units)</label>
-                <input className="input" type="number" step="0.001" min="0.001" value={form.qty}
-                  onChange={(e) => setForm({ ...form, qty: e.target.value })} /></div>
-              <div><label className="label">Price (NGN / asset)</label>
-                <input className="input" type="number" min="1" value={form.price}
-                  onChange={(e) => setForm({ ...form, price: e.target.value })} /></div>
+                </select>
+              </Field>
+              <Field label="Qty (asset units)" id="vasp-qty">
+                <input id="vasp-qty" className="input" type="number" step="0.001" min="0.001" value={form.qty}
+                  onChange={(e) => setForm({ ...form, qty: e.target.value })} />
+              </Field>
+              <Field label="Price (NGN / asset)" required>
+                {(id, describedBy) => (
+                  <MoneyInput id={id} valueKobo={priceKobo} onChangeKobo={setPriceKobo}
+                    aria-describedby={describedBy} aria-required />)}
+              </Field>
             </div>
             <button className="btn">Ingest</button>
           </form>
@@ -105,7 +113,7 @@ export default function Vasp() {
             <div className="mt-3 text-sm space-y-1">
               <div>Trade <span className="font-mono text-xs">{msg.trade_id}</span> ingested.</div>
               {msg.gain_loss && (
-                <div className="rounded-lg bg-sand-50 p-2 text-xs">
+                <div className="rounded-lg bg-neutral-50 p-2 text-xs">
                   gain/loss: <b>{kobo(msg.gain_loss.gain_loss_kobo)}</b> ({msg.gain_loss.method}, proceeds {kobo(msg.gain_loss.proceeds_kobo)} / basis {kobo(msg.gain_loss.basis_kobo)})
                 </div>
               )}
@@ -130,7 +138,7 @@ export default function Vasp() {
       <Card title="CARF messages" actions={<button className="btn" onClick={buildCarf}>Build CARF XML</button>}>
         {carfList.length === 0 ? <Empty>No CARF messages built yet.</Empty> : (
           <table className="w-full">
-            <thead><tr><th className="th">Message</th><th className="th">Type</th><th className="th">Users</th><th className="th">Txns</th><th className="th">Validation</th><th className="th">Status</th><th className="th"></th></tr></thead>
+            <thead><tr><th scope="col" className="th">Message</th><th scope="col" className="th">Type</th><th scope="col" className="th">Users</th><th scope="col" className="th">Txns</th><th scope="col" className="th">Validation</th><th scope="col" className="th">Status</th><th scope="col" className="th"></th></tr></thead>
             <tbody>
               {carfList.map((m: any) => (
                 <tr key={m.id}>
@@ -138,7 +146,7 @@ export default function Vasp() {
                   <td className="td">{m.doc_type_indic}{m.corr_of && ' (correction)'}</td>
                   <td className="td">{m.users}</td>
                   <td className="td">{m.transactions}</td>
-                  <td className="td">{m.validation?.length ? <span className="text-red-600 text-xs">{m.validation.join('; ')}</span> : <span className="text-moss-700 text-xs">valid</span>}</td>
+                  <td className="td">{m.validation?.length ? <span className="text-danger-strong text-xs">{m.validation.join('; ')}</span> : <span className="text-success-strong text-xs">valid</span>}</td>
                   <td className="td"><Status value={m.status} /></td>
                   <td className="td">
                     <div className="flex gap-1">
@@ -152,8 +160,8 @@ export default function Vasp() {
         )}
         {carf && carf.xml && (
           <details className="mt-3">
-            <summary className="text-sm text-sand-600 cursor-pointer">Latest message XML</summary>
-            <pre className="text-xs bg-sand-50 rounded-lg p-3 mt-2 overflow-auto max-h-72">{carf.xml}</pre>
+            <summary className="text-sm text-neutral-600 cursor-pointer">Latest message XML</summary>
+            <pre className="text-xs bg-neutral-50 rounded-lg p-3 mt-2 overflow-auto max-h-72">{carf.xml}</pre>
           </details>
         )}
       </Card>
@@ -164,7 +172,7 @@ export default function Vasp() {
 function Row({ k, v }: { k: string; v: any }) {
   return (
     <div className="flex justify-between gap-4">
-      <span className="text-sand-500">{k}</span><span className="text-right">{v}</span>
+      <span className="text-stone-600">{k}</span><span className="text-right">{v}</span>
     </div>
   )
 }
