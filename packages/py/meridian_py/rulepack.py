@@ -60,6 +60,39 @@ def _repo_packs_dir() -> Path | None:
     return None
 
 
+def _cmp_values(got: Any, want: Any, op: str) -> bool:
+    """Compare for lt/lte/gt/gte: numeric when both parse as float, else
+    lexicographic (ISO dates YYYY-MM-DD compare correctly)."""
+    try:
+        gf, wf = float(got), float(want)
+    except (TypeError, ValueError):
+        gs, ws = str(got), str(want)
+        return {"lt": gs < ws, "lte": gs <= ws, "gt": gs > ws, "gte": gs >= ws}[op]
+    return {"lt": gf < wf, "lte": gf <= wf, "gt": gf > wf, "gte": gf >= wf}[op]
+
+
+def _match_map(base: str, conds: dict, got: Any, exists: bool) -> tuple[bool, str]:
+    """Canonical SPEC grammar: when value is a map of operators, e.g.
+    {in: [...]}, {gte: X}, {lte: X}, {present: true}, {ne: X}."""
+    for op, w in conds.items():
+        if op == "in":
+            if not any(str(item) == str(got) for item in (w or [])):
+                return False, f"{base}={got} not in {w}"
+        elif op == "present":
+            if (exists and got is not None) != bool(w):
+                return False, f"{base} present={exists and got is not None}"
+        elif op == "ne":
+            if str(got) == str(w):
+                return False, f"{base}={got} == {w}"
+        elif op in ("lt", "lte", "gt", "gte"):
+            if got is None or not _cmp_values(got, w, op):
+                return False, f"{base}={got} fails {op} {w}"
+        else:  # nested plain equality
+            if str(got) != str(w):
+                return False, f"{base}={got} != {w}"
+    return True, ""
+
+
 def _match_cond(key: str, want: Any, ctx: dict) -> tuple[bool, str]:
     base, op = key, "eq"
     for suffix in _OPS:
@@ -68,6 +101,19 @@ def _match_cond(key: str, want: Any, ctx: dict) -> tuple[bool, str]:
             break
     got = ctx.get(base)
     exists = base in ctx
+    if op == "eq":
+        # Canonical grammar extensions (rule-packs repo SPEC §1.4):
+        #   key: null            -> fact absent or null
+        #   key: [a, b]          -> membership
+        #   key: {in|gte|lte|gt|lt|ne|present: ...} -> operator map
+        if want is None:
+            ok = (not exists) or got is None
+            return ok, "" if ok else f"{base} present (={got}), want null"
+        if isinstance(want, dict):
+            return _match_map(base, want, got, exists)
+        if isinstance(want, list):
+            ok = any(str(item) == str(got) for item in want)
+            return ok, "" if ok else f"{base}={got} not in {want}"
     if op == "exists":
         return (exists == bool(want)), f"{base} exists={exists}"
     if op == "in":
