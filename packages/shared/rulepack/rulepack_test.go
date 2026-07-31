@@ -11,27 +11,29 @@ func TestLoadEmbeddedAndEvaluateWHT(t *testing.T) {
 		t.Fatalf("ref=%s", p.Ref())
 	}
 	// Canonical pack contexts (rule-packs repo vocabulary, SPEC §1.4 operator maps).
-	// services to a small company with TIN, monthly turnover N1m (<= N2m carve-out)
+	// Small-company carve-out (WHT Regs 2024 reg. 4, tax-law-parity pack): keys
+	// on the PAYER being small + month value <= N2m + supplier TIN -> rate 0.
 	d := Evaluate(p, map[string]any{
-		"payment_type":                   "services",
-		"beneficiary":                    "company",
-		"supplier_tin":                   "12345678-0001",
-		"supplier_size":                  "small",
-		"supplier_monthly_turnover_kobo": 100000000,
-		"payment_event":                  "payment",
+		"payment_type":                 "supply_of_goods_materials",
+		"beneficiary":                  "company",
+		"supplier_tin":                 "12345678-0001",
+		"payer_size":                   "small",
+		"payer_annual_turnover_kobo":   2000000000,
+		"transaction_month_value_kobo": 100000000,
+		"payment_event":                "payment",
 	})
 	if d.Attrs["rate_bps"] != 0 {
 		t.Fatalf("expected carve-out rate 0, got %v", d.Attrs["rate_bps"])
 	}
-	// services, company, valid TIN, N5m monthly -> 5% (canonical rate)
+	// generic other-services, company, valid TIN -> 2% resident (2024 Regs rate)
 	d2 := Evaluate(p, map[string]any{
 		"payment_type":                   "services",
 		"beneficiary":                    "company",
 		"supplier_tin":                   "12345678-0001",
 		"supplier_monthly_turnover_kobo": 500000000,
 	})
-	if d2.Attrs["rate_bps"] != 500 {
-		t.Fatalf("expected 500bps, got %v", d2.Attrs["rate_bps"])
+	if d2.Attrs["rate_bps"] != 200 {
+		t.Fatalf("expected 200bps, got %v", d2.Attrs["rate_bps"])
 	}
 	// royalty: company 10%, individual 5% (embedded drift had them swapped)
 	d3 := Evaluate(p, map[string]any{"payment_type": "royalty", "beneficiary": "company", "supplier_tin": "t"})
@@ -54,8 +56,8 @@ func TestNoTINDoubleRate(t *testing.T) {
 	if d.Attrs["rate_multiplier_bps"] != 20000 {
 		t.Fatalf("expected double rate multiplier 20000bps, got %v", d.Attrs["rate_multiplier_bps"])
 	}
-	if d.Attrs["rate_bps"] != 500 {
-		t.Fatalf("base rate 500 expected, got %v", d.Attrs["rate_bps"])
+	if d.Attrs["rate_bps"] != 200 {
+		t.Fatalf("base rate 200 (generic other-services resident) expected, got %v", d.Attrs["rate_bps"])
 	}
 }
 

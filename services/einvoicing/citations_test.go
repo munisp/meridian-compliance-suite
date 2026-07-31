@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func createInvoice(t *testing.T, srv *Server, inv *CanonicalInvoice) *CanonicalInvoice {
+func createInvoiceFull(t *testing.T, srv *Server, inv *CanonicalInvoice) *CanonicalInvoice {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/invoices", srv.handleCreateInvoice)
@@ -36,7 +36,7 @@ func createInvoice(t *testing.T, srv *Server, inv *CanonicalInvoice) *CanonicalI
 func TestLineCitationsStandardRated(t *testing.T) {
 	srv := newTestServer(t)
 	inv := sampleInvoice()
-	got := createInvoice(t, srv, inv)
+	got := createInvoiceFull(t, srv, inv)
 	if len(got.Lines) == 0 {
 		t.Fatal("no lines")
 	}
@@ -74,7 +74,7 @@ func TestLineCitationsZeroAndExempt(t *testing.T) {
 		{Description: "land sale", QuantityMilli: 1000,
 			UnitPriceKobo: 90000, VatCategory: "E", VatRateBps: 0},
 	}
-	got := createInvoice(t, srv, inv)
+	got := createInvoiceFull(t, srv, inv)
 	z := got.Lines[0].Citations[0]
 	if z.RuleID != "vat.rate.zero" || z.Citation == "" {
 		t.Fatalf("zero-rated citation = %+v", z)

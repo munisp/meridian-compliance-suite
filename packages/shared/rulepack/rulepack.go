@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,10 +36,28 @@ type Pack struct {
 }
 
 // Rule: when-clauses (context predicates) → then-effects (decision payload).
+// Precedence orders multi-match merges (mirrors the Python engine semantics):
+// matched rules apply in ascending (precedence, file order), so the
+// highest-precedence matching rule wins each decision field. A
+// `then.precedence` key is honoured the same way (and never merged out).
 type Rule struct {
-	ID   string         `yaml:"id" json:"id"`
-	When map[string]any `yaml:"when" json:"when"`
-	Then map[string]any `yaml:"then" json:"then"`
+	ID         string         `yaml:"id" json:"id"`
+	Precedence *int           `yaml:"precedence" json:"precedence,omitempty"`
+	When       map[string]any `yaml:"when" json:"when"`
+	Then       map[string]any `yaml:"then" json:"then"`
+}
+
+// precedence resolves rule-level precedence, falling back to then.precedence.
+func (r *Rule) precedence() int {
+	if r.Precedence != nil {
+		return *r.Precedence
+	}
+	if v, ok := r.Then["precedence"]; ok {
+		if f, ok2 := toFloat(v); ok2 {
+			return int(f)
+		}
+	}
+	return 0
 }
 
 // Ref identifies a pack version, e.g. "rp-wht-2024@1.0.0".
@@ -294,16 +313,37 @@ func (r *Rule) Match(ctx map[string]any) (bool, string) {
 }
 
 // Evaluate runs every rule and merges the `then` payloads of matching rules.
+// Merge order is ascending (precedence, file order) — the same semantics the
+// Python engine applies — so a higher-precedence matching rule wins each
+// decision field on multi-match; `then.precedence` itself is never merged.
 func Evaluate(p *Pack, ctx map[string]any) *Decision {
 	d := &Decision{Pack: p.Ref(), Attrs: map[string]any{}}
+	type scoredRule struct {
+		prec int
+		idx  int
+		rule *Rule
+	}
+	var scored []scoredRule
 	for i := range p.Rules {
 		r := &p.Rules[i]
 		ok, why := r.Match(ctx)
 		d.Trace = append(d.Trace, TraceEntry{RuleID: r.ID, Matched: ok, Reason: why})
 		if ok {
-			for k, v := range r.Then {
-				d.Attrs[k] = v
+			scored = append(scored, scoredRule{r.precedence(), i, r})
+		}
+	}
+	sort.SliceStable(scored, func(a, b int) bool {
+		if scored[a].prec != scored[b].prec {
+			return scored[a].prec < scored[b].prec
+		}
+		return scored[a].idx < scored[b].idx
+	})
+	for _, s := range scored {
+		for k, v := range s.rule.Then {
+			if k == "precedence" {
+				continue
 			}
+			d.Attrs[k] = v
 		}
 	}
 	return d
