@@ -33,6 +33,12 @@ ctx = Ctx()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # FAIL CLOSED (audit fix PB-6): AUTH_MODE=keycloak without KEYCLOAK_ISSUER
+    # refuses to boot instead of silently dropping to the dev auth path.
+    if os.environ.get("AUTH_MODE") == "keycloak" and not os.environ.get("KEYCLOAK_ISSUER"):
+        raise RuntimeError(
+            "AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset; refusing to "
+            "start (no dev fallback)")
     yield
 
 
@@ -72,7 +78,11 @@ _jwks_client = None
 
 
 def _keycloak_enabled() -> bool:
-    return os.environ.get("AUTH_MODE") == "keycloak" and bool(os.environ.get("KEYCLOAK_ISSUER"))
+    return os.environ.get("AUTH_MODE") == "keycloak"
+
+
+def _keycloak_configured() -> bool:
+    return bool(os.environ.get("KEYCLOAK_ISSUER"))
 
 
 def _verify_keycloak(token: str) -> dict:
@@ -105,6 +115,9 @@ def _verify_keycloak(token: str) -> dict:
 async def auth(request: Request) -> dict:
     hdr = request.headers.get("authorization", "")
     if _keycloak_enabled():
+        if not _keycloak_configured():
+            # fail closed: misconfigured prod denies every request
+            raise HTTPException(401, "unauthorized: AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset")
         if hdr.startswith("Bearer "):
             try:
                 return _verify_keycloak(hdr[7:])
@@ -119,7 +132,7 @@ async def auth(request: Request) -> dict:
             raise HTTPException(401, f"unauthorized: {e}")
     if os.environ.get("AUTH_MODE", "dev") == "dev":
         role = request.headers.get("x-dev-role")
-        if role:
+        if role in ("admin", "operator", "auditor"):
             return {"sub": f"dev-{role}", "roles": [role]}
     raise HTTPException(401, "unauthorized: Bearer JWT or X-Dev-Role (dev mode) required")
 
@@ -143,10 +156,13 @@ async def packs(_: dict = Depends(auth)):
                       for pid, p in sorted(ctx.packs.packs.items())]}
 
 
-# ---- dev JWT issuer for the portal login ----
+# ---- dev JWT issuer for the portal login (DEV ONLY: unauthenticated token
+# minting; disabled unless AUTH_MODE=dev) ----
 
 @app.post("/v1/dev-token")
 async def dev_token(body: dict):
+    if os.environ.get("AUTH_MODE", "dev") != "dev":
+        raise HTTPException(404, "not found")
     secret = os.environ.get("MERIDIAN_DEV_JWT_SECRET", "meridian-dev-secret")
     header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=")
     payload = base64.urlsafe_b64encode(json.dumps({
