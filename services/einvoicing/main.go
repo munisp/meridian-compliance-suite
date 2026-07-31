@@ -40,12 +40,14 @@ const serviceVersion = "1.0.0"
 
 // Server wires the service's dependencies.
 type Server struct {
-	store     *InvoiceStore
-	outbox    *envelope.Outbox
-	signer    *CSIDSigner
-	validator *Validator
-	router    *APPRouter
-	runner    *InprocRunner
+	store      *InvoiceStore
+	outbox     *envelope.Outbox
+	signer     *CSIDSigner
+	validator  *Validator
+	router     *APPRouter
+	runner     *InprocRunner
+	serviceIDs *ServiceIDRegistry
+	webhooks   *WebhookRegistry
 }
 
 func dataDir() string {
@@ -116,9 +118,15 @@ func main() {
 	}
 	srv := &Server{
 		store: store, outbox: outbox, signer: signer,
-		validator: NewValidator(),
-		router:    NewAPPRouter(NewMBSClient()),
-		runner:    NewInprocRunner(),
+		validator:  NewValidator(),
+		router:     NewAPPRouter(NewMBSClient()),
+		runner:     NewInprocRunner(),
+		serviceIDs: NewServiceIDRegistry(),
+		webhooks:   NewWebhookRegistry(nil),
+	}
+	// Dev in-process webhook sink when WEBHOOK_SINK=inproc (default HTTP).
+	if os.Getenv("WEBHOOK_SINK") == "inproc" {
+		srv.webhooks.Sink = &InprocWebhookSink{}
 	}
 	registerWorkflows(srv.runner)
 
@@ -130,6 +138,10 @@ func main() {
 		writeJSON(w, 200, map[string]any{"status": "ready", "packs": srv.validator.PackVersions()})
 	})
 	mux.HandleFunc("POST /v1/invoices", srv.handleCreateInvoice)
+	mux.HandleFunc("POST /v1/invoices/nrs", srv.handleNRSCreate)
+	mux.HandleFunc("PATCH /v1/invoices/{irn}", srv.handleNRSUpdate)
+	mux.HandleFunc("POST /v1/webhooks", srv.handleWebhookRegister)
+	mux.HandleFunc("GET /v1/webhooks", srv.handleWebhookList)
 	mux.HandleFunc("GET /v1/invoices/{id}", srv.handleGetInvoice)
 	mux.HandleFunc("POST /v1/invoices/{id}/preclear", srv.handlePreclear)
 	mux.HandleFunc("GET /v1/invoices/{id}/qr", srv.handleGetQR)
@@ -381,7 +393,7 @@ func (s *Server) handleReplayOne(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"registered": []string{"wf-mbs-preclearance"},
+		"registered": []string{"wf-mbs-preclearance", "wf-nrs-einvoice"},
 		"runs":       s.runner.Runs(),
 		"runner":     runnerKind(),
 	})

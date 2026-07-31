@@ -123,6 +123,7 @@ func retryActivity(ctx context.Context, name string, attempts int, rec func(Step
 // registerWorkflows binds wf-mbs-preclearance on the runner.
 func registerWorkflows(r *InprocRunner) {
 	r.Register("wf-mbs-preclearance", wfMBSPreclearance)
+	r.Register("wf-nrs-einvoice", wfNRSEinvoice)
 }
 
 // wfMBSPreclearance: validate → sign → submit → record (SPEC §3).

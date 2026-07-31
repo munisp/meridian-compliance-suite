@@ -23,6 +23,7 @@ type InvoiceStore struct {
 	byID      map[string]*CanonicalInvoice
 	byIdemKey map[string]string // idempotency key -> invoice id
 	bySuppNum map[string]string // supplierTIN|invoiceNumber -> id
+	byIRN     map[string]string // IRN -> invoice id (NRS parity)
 	order     []string
 	docs      *prodx.DocStore // non-nil when DATABASE_URL set (prod)
 }
@@ -55,6 +56,7 @@ func NewInvoiceStore(path string) (*InvoiceStore, error) {
 	s := &InvoiceStore{
 		path: path, byID: map[string]*CanonicalInvoice{},
 		byIdemKey: map[string]string{}, bySuppNum: map[string]string{},
+		byIRN: map[string]string{},
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -97,6 +99,21 @@ func (s *InvoiceStore) index(inv *CanonicalInvoice) {
 		// tenant-prefixed: same supplier TIN + number in another tenant is NOT a duplicate
 		s.bySuppNum[inv.TenantID+"|"+inv.Supplier.TIN+"|"+inv.InvoiceNumber] = inv.ID
 	}
+	if inv.IRN != "" {
+		s.byIRN[inv.IRN] = inv.ID
+	}
+}
+
+// GetByIRN resolves an invoice by its NRS IRN.
+func (s *InvoiceStore) GetByIRN(irn string) (*CanonicalInvoice, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.byIRN[irn]
+	if !ok {
+		return nil, false
+	}
+	cp := *s.byID[id]
+	return &cp, true
 }
 
 // ErrIdempotentReplay is returned (with the prior invoice) when an
