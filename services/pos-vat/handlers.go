@@ -96,6 +96,7 @@ func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 	// normalise + classify baskets
 	rate := s.packs.StandardRateBPS()
 	rc.Baskets = map[string]int64{"standard_75": 0, "zero_rated": 0, "exempt": 0}
+	basketCats := map[string]map[string]bool{}
 	var total, vat int64
 	for _, ln := range rc.Lines {
 		if ln.Qty <= 0 || ln.UnitPrice < 0 {
@@ -104,6 +105,10 @@ func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 		amount := ln.UnitPrice * ln.Qty / 1000 // qty in milli-units
 		basket := s.packs.BasketFor(ln.Category)
 		rc.Baskets[basket] += amount
+		if basketCats[basket] == nil {
+			basketCats[basket] = map[string]bool{}
+		}
+		basketCats[basket][ln.Category] = true
 		total += amount
 		if basket == "standard_75" {
 			vat += roundBpsHalfUp(amount, rate)
@@ -111,6 +116,9 @@ func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 	}
 	rc.TotalKobo = total
 	rc.VATKobo = vat
+	// LCE SPEC §5: annotate the response with statute citations for the
+	// computed VAT (lookup over the basket decisions above; no logic change).
+	rc.Citations = s.receiptCitations(basketCats)
 	// capture-time state/LGA attribution
 	geo, err := s.geo.AttributePoint(rc.Lat, rc.Lon)
 	if err != nil {

@@ -44,6 +44,7 @@ from typing import Any
 
 import httpx
 
+from meridian_py import citations as lce_citations
 from meridian_py.rulepack import Pack, PackRegistry
 from meridian_py.rulepack import _match_cond as _shared_match_cond
 
@@ -355,6 +356,19 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
     trigger_date = min(dates) if dates else (ctx.get("date") or "")
     trigger = ctx.get("payment_event", "")
 
+    # LCE SPEC §5 runtime citation chain: every computed amount carries its
+    # statute citations, resolved from the coverage matrix reverse index over
+    # the matched rules already in the trace (lookup, not new logic; missing
+    # coverage degrades to empty statute fields, never an error).
+    citations: list[dict] = []
+    try:
+        pack_ref = str(result.get("pack") or "rp-wht-2024@")
+        pack_id, _, pack_version = pack_ref.partition("@")
+        pack = _registry.load(pack_id or "rp-wht-2024", pack_version)
+        citations = lce_citations.build_citations(pack, matched)
+    except Exception:
+        citations = []  # citation resolution must never break evaluation
+
     return {
         "pack": result["pack"], "via": result.get("via", "embedded-pack"),
         "subject_to_regazette": True,
@@ -374,6 +388,11 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
         "identity": {"tin_check": tin_check.__dict__,
                      "nin_accepted": (not tin) and identity_ok},
         "matched_rules": matched,
+        "citations": citations,
+        "amount_citations": {
+            "wht_kobo": [c["rule_id"] for c in citations],
+            "net_payable_kobo": [c["rule_id"] for c in citations],
+        },
         "narration": dec.get("narrate", ""),
         "trace": result["trace"],
     }

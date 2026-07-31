@@ -1,0 +1,39 @@
+# Coverage matrix — CAMA 2020 persons with significant control
+statute:
+  id: cama-2020-psc
+  title: Companies and Allied Matters Act 2020 — Persons with Significant Control
+  jurisdiction: NG-FED
+  effective_from: '2020-08-07'
+  gazette: Companies and Allied Matters Act 2020
+  subject_to_regazette: false
+
+sections:
+  - section_id: psc.register
+    title: PSC register — companies must keep and file beneficial-ownership register (s.119)
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/other-issues
+    citation_kind: secondary
+    notes: Cross-ref identity-gaps register — PSC register capture and CAC filing not yet built.
+
+  - section_id: psc.disclosure-threshold
+    title: Disclosure threshold — 5% direct/indirect holding triggers PSC notification
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/other-issues
+    citation_kind: secondary
+    notes: Cross-ref identity-gaps register — threshold engine pending identity-match work.
+
+  - section_id: psc.identity-matching
+    title: Identity evidence for PSC onboarding (TIN/NIN/CAC matching)
+    implementing_rules:
+      - rp-identity-match-thresholds:id.match.tin-exact
+      - rp-identity-match-thresholds:id.match.nin-exact
+      - rp-identity-match-thresholds:id.match.cac-exact
+    conformance_tests: []
+    status: PARTIAL
+    citation_kind: secondary
+    notes: Identity match thresholds exist; PSC-specific wiring (register, thresholds)
+      pending per identity-gaps register.

@@ -1,0 +1,297 @@
+# Coverage matrix — Deduction of Tax at Source (Withholding) Regulations 2024
+# Source: tax-law-gaps findings #1-#9, #14-#16; gov-filing register §1.3.
+statute:
+  id: wht-regs-2024
+  title: Deduction of Tax at Source (Withholding) Regulations 2024
+  jurisdiction: NG-FED
+  effective_from: '2025-01-01'        # regs in force 2025-01-01 (winnings rules 2024-10-01)
+  gazette: Federal Republic of Nigeria Official Gazette No. 106, Vol. 111 of 2024 (awaiting CTC)
+  subject_to_regazette: true
+
+sections:
+  - section_id: reg-3.deduction-trigger
+    title: Deduction arises at the earlier of payment or settlement
+    implementing_rules:
+      - rp-wht-2024:wht.trigger.due-date
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: first-schedule.dividend
+    title: Dividends — 10% (resident and non-resident)
+    implementing_rules:
+      - rp-wht-2024:wht.rate.dividend.company
+      - rp-wht-2024:wht.rate.dividend.individual
+    conformance_tests:
+      - wht.rates-matrix.dividend-company
+      - wht.rates-matrix.dividend-individual
+      - wht.rates-matrix.dividend-company-nr
+      - wht.no-tin-double.dividend-not-doubled
+    status: IMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/withholding-taxes
+    citation_kind: secondary
+
+  - section_id: first-schedule.interest
+    title: Interest — 10%
+    implementing_rules:
+      - rp-wht-2024:wht.rate.interest.company
+      - rp-wht-2024:wht.rate.interest.individual
+    conformance_tests:
+      - wht.rates-matrix.interest-company
+      - wht.rates-matrix.interest-company-nr
+      - wht.no-tin-double.interest-not-doubled
+    status: IMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/withholding-taxes
+    citation_kind: secondary
+
+  - section_id: first-schedule.rent
+    title: Rent — 10%
+    implementing_rules:
+      - rp-wht-2024:wht.rate.rent.company
+      - rp-wht-2024:wht.rate.rent.individual
+    conformance_tests:
+      - wht.rates-matrix.rent-individual
+      - wht.rates-matrix.rent-company-nr
+      - wht.no-tin-double.rent-not-doubled
+    status: IMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/withholding-taxes
+    citation_kind: secondary
+
+  - section_id: first-schedule.royalty
+    title: Royalty — 5% individual / 10% company; NR individual stays 5% (precedence guard, finding #7)
+    implementing_rules:
+      - rp-wht-2024:wht.rate.royalty.company
+      - rp-wht-2024:wht.rate.royalty.individual
+      - rp-wht-2024:wht.rate.royalty.non-resident-company
+      - rp-wht-2024:wht.rate.royalty.non-resident-individual
+    conformance_tests:
+      - test_t3_royalty_non_resident_individual_5pct_not_clobbered
+      - test_t3_royalty_non_resident_company_10pct
+      - wht.rates-matrix.royalty-company
+      - wht.rates-matrix.royalty-individual
+      - wht.rates-matrix.royalty-company-nr
+      - wht.rates-matrix.royalty-individual-nr
+      - wht.no-tin-double.royalty-not-doubled
+    status: IMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/withholding-taxes
+    citation_kind: secondary
+    notes: Audit finding #7 — explicit precedence keeps generic NR rule from clobbering 5% NR individual.
+
+  - section_id: first-schedule.directors-fees
+    title: Directors' fees — 15% resident individual / 20% non-resident (final)
+    implementing_rules:
+      - rp-wht-2024:wht.rate.directors-fees.individual
+      - rp-wht-2024:wht.rate.directors-fees.non-resident
+    conformance_tests:
+      - test_t1_directors_fees_resident_individual_15pct
+      - test_t1_directors_fees_non_resident_20pct
+      - wht.rates-matrix.directors-fees-individual
+      - wht.rates-matrix.directors-fees-individual-nr
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+    notes: Fixed under audit findings #1/#2 (was 10% / uncovered).
+
+  - section_id: first-schedule.winnings
+    title: Winnings — 5% resident / 15% non-resident, effective 2024-10-01
+    implementing_rules:
+      - rp-wht-2024:wht.rate.winnings.resident
+      - rp-wht-2024:wht.rate.winnings.non-resident
+    conformance_tests:
+      - test_t2_winnings_resident_5pct_not_exempt
+      - test_t2_winnings_non_resident_15pct
+      - test_t2_winnings_rules_effective_2024_10_01
+      - wht.rates-matrix.winnings-lottery-individual
+      - wht.rates-matrix.winnings-reality-show-individual-nr
+      - wht.rates-matrix.winnings-pre-commencement-unrated
+      - wht.rates-matrix.winnings-commencement-2024-10-01
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+    notes: Boundary-date pair 2024-09-30/2024-10-01 proves the winnings commencement split.
+
+  - section_id: first-schedule.goods
+    title: Supply of goods and materials — 2%
+    implementing_rules:
+      - rp-wht-2024:wht.rate.goods-supply.any
+    conformance_tests:
+      - wht.rates-matrix.goods-company
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+
+  - section_id: first-schedule.construction
+    title: Construction — 2% roads/resident core; 5% resident other / NR core; 10% NR other
+    implementing_rules:
+      - rp-wht-2024:wht.rate.construction.core
+      - rp-wht-2024:wht.rate.construction.other
+      - rp-wht-2024:wht.rate.construction.non-resident.core
+      - rp-wht-2024:wht.rate.construction.non-resident.other
+    conformance_tests:
+      - test_t3_construction_matrix
+      - wht.rates-matrix.construction-roads-company
+      - wht.rates-matrix.construction-other-company
+      - wht.rates-matrix.construction-buildings-company-nr
+      - wht.rates-matrix.construction-other-company-nr
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+
+  - section_id: first-schedule.services-split
+    title: Other services 2% resident split from professional fees 5%; NR other services 5%
+    implementing_rules:
+      - rp-wht-2024:wht.rate.services.company
+      - rp-wht-2024:wht.rate.other-services.company
+      - rp-wht-2024:wht.rate.services.individual
+      - rp-wht-2024:wht.rate.other-services.individual
+      - rp-wht-2024:wht.rate.other-services.non-resident
+    conformance_tests:
+      - test_t3_other_services_resident_company_2pct
+      - test_t3_professional_fees_stay_5pct
+      - test_t3_other_services_non_resident_5pct
+      - wht.rates-matrix.services-company
+      - wht.rates-matrix.services-individual
+      - wht.rates-matrix.services-company-nr
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+
+  - section_id: first-schedule.professional-and-commission
+    title: Professional/consultancy/technical/management fees 5%; commission 5%; NR 10%
+    implementing_rules:
+      - rp-wht-2024:wht.rate.commission.any
+      - rp-wht-2024:wht.rate.non-resident.standard
+    conformance_tests:
+      - wht.rates-matrix.consultancy-company
+      - wht.rates-matrix.professional-individual
+      - wht.rates-matrix.technical-company-nr
+      - wht.rates-matrix.management-company-nr
+      - wht.rates-matrix.commission-individual
+      - wht.rates-matrix.commission-company-nr
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+
+  - section_id: reg-4.exemptions
+    title: Exemptions — direct debit, broker securities, imported goods, manufacturer/producer, franked investment income
+    implementing_rules:
+      - rp-wht-2024:wht.exempt.direct-debit
+      - rp-wht-2024:wht.exempt.broker-securities
+      - rp-wht-2024:wht.exempt.imported-goods
+      - rp-wht-2024:wht.exempt.manufactured-goods
+      - rp-wht-2024:wht.exempt.franked-investment-income
+      - rp-wht-2024:wht.exempt.telephone-airline
+      - rp-wht-2024:wht.exempt.lpg-cng
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+    notes: Pack rules exist; declarative exemption cases are a follow-up (validator warns meanwhile).
+
+  - section_id: reg-5.small-company-carveout
+    title: Small company (payer) relieved of deduction where txn <= N2m/month AND supplier has valid TIN
+    implementing_rules:
+      - rp-wht-2024:wht.small-co.carveout
+    conformance_tests:
+      - test_t5_carveout_granted_with_tin
+      - test_t5_carveout_denied_without_supplier_tin
+      - test_t5_carveout_denied_when_payer_not_small
+      - test_t5_carveout_denied_when_transaction_over_2m_month
+      - wht.carveout.granted-with-tin
+      - wht.carveout.denied-without-supplier-tin
+      - wht.carveout.denied-payer-not-small
+      - wht.carveout.denied-over-2m-month
+      - wht.carveout.no-tin-never-zero
+    status: IMPLEMENTED
+    citation_url: https://www.shqlegal.com/insights/deduction-of-tax-at-source-withholding-regulations-2024
+    citation_kind: secondary
+
+  - section_id: reg-8.no-tin-double-rate
+    title: No-TIN double rate — active income only; NIN acceptable as identity for individuals
+    implementing_rules:
+      - rp-wht-2024:wht.no-tin.double-rate
+      - rp-wht-2024:wht.identity.nin-acceptable
+    conformance_tests:
+      - test_t7_no_tin_doubles_active_income
+      - test_t7_no_tin_does_not_double_passive_income
+      - wht.no-tin-double.services-doubles
+      - wht.no-tin-double.dividend-not-doubled
+      - wht.no-tin-double.interest-not-doubled
+      - wht.no-tin-double.royalty-not-doubled
+      - wht.no-tin-double.rent-not-doubled
+    status: IMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+
+  - section_id: remittance.deadlines
+    title: Remittance — 21st of following month (companies, NRS) / 30th (individuals, State IRS)
+    implementing_rules:
+      - rp-wht-2024:wht.remittance.deadline-company
+      - rp-wht-2024:wht.remittance.deadline-individual
+      - rp-fmt-federal:fmt.federal.wht-companies
+      - rp-fmt-federal:fmt.federal.wht-individuals
+    conformance_tests: []
+    status: IMPLEMENTED
+    citation_kind: secondary
+
+  - section_id: schedule.credit-notes
+    title: Credit notes / beneficiary certificates
+    implementing_rules:
+      - rp-wht-2024:wht.credit.receipt
+    conformance_tests: []
+    status: PARTIAL
+    citation_kind: secondary
+    notes: Credit ledger exists; no beneficiary certificate object yet (gov-filing register §1.3).
+
+  - section_id: first-schedule.treaty-relief
+    title: Treaty-reduced rates (7.5% dividends/interest/royalty for DTT territories)
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/withholding-taxes
+    citation_kind: secondary
+    notes: Audit finding #16. Needs treaty table pack (rp-wht-treaty) — not this session.
+
+  - section_id: schedule.co-location-telecom-tower
+    title: Co-location / telecom tower services 2%/5%
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+    notes: Audit finding #15 — also missing from wht KNOWN_PAYMENT_TYPES (422 today).
+
+  - section_id: schedule.brokerage
+    title: Brokerage fees — schedule rate
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+    notes: Audit finding #15.
+
+  - section_id: schedule.entertainers
+    title: Entertainers and sports persons — schedule rate
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+    notes: Audit finding #15.
+
+  - section_id: schedule.compensation-loss-of-employment
+    title: Compensation for loss of employment — schedule rate
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://kpmg.com/ng/en/home/insights/2024/07/deduction-of-tax-at-source-withholding-regulations-2024.html
+    citation_kind: secondary
+    notes: Audit finding #15.
+
+  - section_id: pre-2025.legacy-rates
+    title: Pre-2025 legacy WHT rates (CITA/PITA WHT 1997 regime)
+    implementing_rules: []
+    conformance_tests: []
+    status: UNIMPLEMENTED
+    citation_url: https://taxsummaries.pwc.com/nigeria/corporate/withholding-taxes
+    citation_kind: secondary
+    notes: Audit finding #14 — needs rp-wht-legacy pack. Back-period WHT evaluations have no rules today.

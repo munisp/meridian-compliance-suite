@@ -102,7 +102,11 @@ mark remitted).
 
 REST (SPEC §3): `POST /v1/wht/evaluate`, `POST /v1/wht/remit-file`,
 `GET /v1/wht/credits/{vendor_tin}` plus deductions CRUD, credit application,
-vendor verification, workflow runs.
+vendor verification, workflow runs. `POST /v1/wht/evaluate` responses carry
+**[REAL] statute citations** (`citations` + `amount_citations`, LCE SPEC §5)
+resolved from the coverage matrix over the matched pack rules — e.g.
+directors' fees 15% cites WHT Regs 2024, First Schedule
+(`wht-regs-2024:first-schedule.directors-fees`).
 
 ```bash
 cd services/wht && uvicorn app.main:app --port 8130
@@ -146,6 +150,7 @@ pip install -r services/rev360/requirements.txt -r services/wht/requirements.txt
 | MBS rail | **SIMULATED** — full sandbox (IRN + ed25519 stamp) behind `MBSClient`; real rail via `MBS_BASE_URL` |
 | Rev360 (NRS-side) view | **SIMULATED** — deterministic dataset generator, the system under reconciliation |
 | rules-engine / rp-registry | Real local evaluator; core API used when URLs set |
+| Runtime citation chain (LCE SPEC §5) | **REAL** — statute citations on computed amounts (wht `citations`/`amount_citations`, pos-vat receipt `citations`, einvoicing per-line `citations`) resolved from the vendored coverage matrix (`packages/shared/rulepack/coverage`, override via `LCE_COVERAGE_DIR`). Matrix content `citation_kind` is **secondary** for WHT/NTA rows until CTC verification (registry workstream owns the CTC feed); missing coverage degrades to empty statute fields, never an error |
 | tin-graph TIN verification | Local 13-digit validator; core API when `TIN_GRAPH_URL` set |
 | audit-evidence WORM | Local hash-chained WORM store; core API when `AUDIT_EVIDENCE_URL` set |
 | Temporal | In-process runner with same step/retry semantics; `TEMPORAL_URL` is the core-sdkx wiring point |
