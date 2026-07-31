@@ -214,9 +214,12 @@ def build_context(req: dict) -> dict:
         ctx["supplier_tin"] = tin
     if nin:
         ctx["supplier_nin"] = nin
-    # Small-company carve-out (WHT Regs 2024 reg. 4, audit finding #8): the
-    # relief belongs to the small-company PAYER (<= N25m p.a.), for transaction
-    # values <= N2m in the calendar month, and only with a supplier TIN.
+    # Small-company carve-out (WHT Regs 2024 reg. 4, canonical pack): keyed on
+    # the PAYER being a small company (<= N25m p.a.), the transaction value not
+    # exceeding N2m in the calendar month, AND the supplier having a valid TIN.
+    # Legacy supplier-side facts (supplier_size/supplier_monthly_turnover_kobo)
+    # are intentionally NOT honoured alone — that modeling was the audit's
+    # over-exemption bug.
     if req.get("payer_size"):
         ctx["payer_size"] = req["payer_size"]
     elif req.get("payer_is_small_company"):
@@ -231,6 +234,18 @@ def build_context(req: dict) -> dict:
         ctx["supplier_monthly_turnover_kobo"] = int(req["supplier_monthly_turnover_kobo"])
     if req.get("supplier_size"):
         ctx["supplier_size"] = req["supplier_size"]
+    if req.get("transaction_month_value_kobo") is None and req.get("amount_kobo") is not None:
+        # Default: this payment is the transaction value in the month.
+        ctx["transaction_month_value_kobo"] = int(req["amount_kobo"])
+    # Construction rate split (First Schedule): roads/bridges/buildings/power
+    # plants vs any other construction — default to "other" (the general rate).
+    if req.get("construction_type"):
+        ctx["construction_type"] = req["construction_type"]
+    elif ctx["payment_type"] == "construction":
+        ctx["construction_type"] = "other"
+    # Winnings source (lottery/gaming/reality_show) for the First Schedule rates.
+    if req.get("source"):
+        ctx["source"] = req["source"]
     if req.get("beneficiary_residence"):
         ctx["beneficiary_residence"] = req["beneficiary_residence"]
     if req.get("via_direct_debit"):
