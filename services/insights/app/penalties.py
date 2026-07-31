@@ -21,8 +21,51 @@ LATE_FILING = {
     "WHT":  (date(2026, 1, 1), 10_000_000, 5_000_000),
     "PIT":  (date(2026, 1, 1), 10_000_000, 5_000_000),
 }
-# Late payment: % of tax due (bps) per tax type (WHT: 40% one-off, NTAA s.74)
-LATE_PAYMENT_BPS = {"VAT": 1000, "CIT": 1000, "PIT": 1000, "WHT": 4000}
+# Late payment: % of tax due (bps) per tax type, effective-dated.
+# AUDIT FIX (parity4/gov-filing-gaps §2): the previous WHT rate of 40%
+# citing "NTAA s.74" was wrong — gazetted NTAA s.74 is not a WHT offence
+# provision (advance rulings / digital assets pagination). The gazette-
+# aligned general late-payment rule is NTAA s.65: 10% of the tax due PLUS
+# interest at CBN MPR (PwC Tax Summaries; Banwo & Ighodalo s.65 summary).
+# 40% appears to be a legacy CITA-era figure. Corrected to 1000 bps,
+# effective from NTAA commencement (2026-01-01).
+# (effective_from, bps) per tax type — resolution picks latest row <= due.
+LATE_PAYMENT_BPS = {
+    "VAT": [(date(2026, 1, 1), 1000)],
+    "CIT": [(date(2026, 1, 1), 1000)],
+    "PIT": [(date(2026, 1, 1), 1000)],
+    "WHT": [(date(2026, 1, 1), 1000)],  # was 4000 — see audit note above
+}
+
+# Failure to register (NTAA 2025 s.100(1), gazette text): N50,000 in the
+# first month of default + N25,000 for EACH subsequent month the failure
+# continues (AfricaCheck factsheet; Banwo & Ighodalo).
+REGISTER_FAILURE = (date(2026, 1, 1), 5_000_000, 2_500_000)  # kobo
+
+# Contracting an unregistered person (NTAA s.100(2)): N5,000,000 penalty on
+# the agency/company per engagement.
+UNREGISTERED_CONTRACT_KOBO = 500_000_000_00  # N5,000,000
+
+
+def registration_penalty(months_unregistered: int, when: date) -> int:
+    """NTAA s.100(1) tiered failure-to-register penalty (integer kobo).
+    Fail-closed: no penalty rows before the NTAA effective date."""
+    if months_unregistered <= 0:
+        return 0
+    eff, first, per_month = REGISTER_FAILURE
+    if when < eff:
+        raise ValueError("no registration-penalty rule on record for %s" % when)
+    return first + per_month * (months_unregistered - 1)
+
+
+def unregistered_contract_penalty(engagements: int, when: date) -> int:
+    """NTAA s.100(2): N5m per engagement of an unregistered person."""
+    if engagements <= 0:
+        return 0
+    eff, _, _ = REGISTER_FAILURE
+    if when < eff:
+        raise ValueError("no registration-penalty rule on record for %s" % when)
+    return UNREGISTERED_CONTRACT_KOBO * engagements
 
 # (effective_from, mpr_bps) — CBN MPC decisions (published).
 MPR_TABLE = [
@@ -92,7 +135,8 @@ def compute(tax_type: str, due: date, filed: date | None, paid: date | None,
     interest_kobo = 0
     mpr = mpr_at(due)
     if days_late and tax_kobo > 0:
-        payment_kobo = tax_kobo * LATE_PAYMENT_BPS[tax_type] // 10_000
+        payment_bps = _rate_at(LATE_PAYMENT_BPS[tax_type], due)[0]
+        payment_kobo = tax_kobo * payment_bps // 10_000
         # simple interest, ACT/365, rate fixed at MPR in force on due date
         interest_kobo = tax_kobo * (mpr + SPREAD_BPS) * days_late // (10_000 * 365)
     return PenaltyResult(tax_type, months, days_late, filing_kobo,
