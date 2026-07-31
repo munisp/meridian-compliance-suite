@@ -30,6 +30,18 @@ func qrKey() []byte {
 	return []byte(qrDevKey)
 }
 
+// validateQRKey enforces the fail-closed contract (audit fix M-4): outside
+// AUTH_MODE=dev the silent qrDevKey default is forbidden — production must
+// inject an explicit QR_HMAC_KEY (KMS-managed). main() refuses to start when
+// this returns an error.
+func validateQRKey() error {
+	mode := os.Getenv("AUTH_MODE")
+	if mode != "" && mode != "dev" && os.Getenv("QR_HMAC_KEY") == "" {
+		return fmt.Errorf("QR_HMAC_KEY is required when AUTH_MODE=%s (no silent dev-key default)", mode)
+	}
+	return nil
+}
+
 // QRPayload builds the signed verification payload for an invoice:
 //
 //	NRS1|<IRN>|<supplierTIN>|<payableKobo>|<yyyymmddhhmmss>|<hmac12>

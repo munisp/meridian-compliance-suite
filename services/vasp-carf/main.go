@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/munisp/meridian-compliance-suite/packages/authx"
 )
 
 type Config struct {
@@ -31,6 +34,7 @@ type Service struct {
 	packs  *PackSet
 	gates  *GateChecker
 	carf   *CARFStore
+	kc     *authx.KeycloakVerifier // non-nil when AUTH_MODE=keycloak (SPEC §1.3)
 }
 
 func main() {
@@ -48,6 +52,19 @@ func main() {
 	svc := &Service{
 		cfg: cfg, engine: NewEngine(cfg.DataDir), packs: NewPackSet(cfg.RegistryURL),
 		gates: NewGateChecker(cfg.RegWatchURL, cfg.DataDir), carf: NewCARFStore(),
+	}
+	// SPEC §1.3: AUTH_MODE=keycloak selects RS256/JWKS verification.
+	// FAIL CLOSED: a keycloak deployment missing OIDC config refuses to boot
+	// rather than silently run the forgeable dev HS256 auth.
+	if cfg.AuthMode == "keycloak" {
+		v := authx.KeycloakVerifierFromEnv()
+		if v == nil {
+			log.Fatal("AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset; refusing to start (no dev fallback)")
+		}
+		svc.kc = v
+		log.Printf("profile=prod component=auth (keycloak issuer=%s)", v.Issuer)
+	} else {
+		log.Printf("profile=dev component=auth")
 	}
 	svc.packs.LoadAll()
 
@@ -92,20 +109,63 @@ func orDef(s, d string) string {
 	return s
 }
 
+type ctxKey string
+
+const claimsCtxKey ctxKey = "claims"
+
+// claimsOf returns the authenticated principal (nil when unauthenticated).
+func claimsOf(r *http.Request) *Claims {
+	if c, ok := r.Context().Value(claimsCtxKey).(*Claims); ok {
+		return c
+	}
+	return nil
+}
+
+func hasRole(c *Claims, role string) bool {
+	if c == nil {
+		return false
+	}
+	for _, r := range c.Roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+// auth implements SPEC §1.3: keycloak mode verifies RS256 against the realm
+// JWKS (fail-closed; no X-Dev-Role); dev mode accepts HS256 Bearer tokens and
+// an allowlisted X-Dev-Role header.
 func (s *Service) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := r.Header.Get("Authorization")
 		if strings.HasPrefix(h, "Bearer ") {
-			if _, err := verifyHS256(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret); err != nil {
+			tok := strings.TrimPrefix(h, "Bearer ")
+			if s.kc != nil {
+				c, err := s.kc.Verify(tok)
+				if err != nil {
+					writeProblem(w, 401, "unauthorized", err.Error())
+					return
+				}
+				claims := &Claims{Sub: c.Sub, Roles: c.Roles, TenantID: c.TenantID, Exp: c.Exp}
+				next(w, r.WithContext(context.WithValue(r.Context(), claimsCtxKey, claims)))
+				return
+			}
+			c, err := verifyHS256(tok, s.cfg.JWTSecret)
+			if err != nil {
 				writeProblem(w, 401, "unauthorized", err.Error())
 				return
 			}
-			next(w, r)
+			next(w, r.WithContext(context.WithValue(r.Context(), claimsCtxKey, c)))
 			return
 		}
-		if s.cfg.AuthMode == "dev" && r.Header.Get("X-Dev-Role") != "" {
-			next(w, r)
-			return
+		if s.kc == nil && s.cfg.AuthMode == "dev" {
+			switch role := r.Header.Get("X-Dev-Role"); role {
+			case "admin", "operator", "auditor":
+				c := &Claims{Sub: "dev-" + role, Roles: []string{role}, TenantID: r.Header.Get("X-Tenant-ID")}
+				next(w, r.WithContext(context.WithValue(r.Context(), claimsCtxKey, c)))
+				return
+			}
 		}
 		writeProblem(w, 401, "unauthorized", "Bearer JWT or X-Dev-Role (dev mode) required")
 	}
@@ -343,7 +403,7 @@ func (s *Service) handleGates(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleGateFlip(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Dev-Role") != "admin" {
+	if !hasRole(claimsOf(r), "admin") {
 		writeProblem(w, 403, "forbidden", "gate flip requires admin role (board-authorized)")
 		return
 	}

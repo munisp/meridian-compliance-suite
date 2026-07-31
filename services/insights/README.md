@@ -12,3 +12,15 @@ FastAPI microservice for compliance intelligence over the Meridian data plane.
 | POST /v1/insights/fx/convert | I14 FX validation (CBN-rate interface, daily table, conversion audit trail) | REAL with static table (live CBN SIMULATED until `CBN_FX_URL`) |
 
 Run: `uvicorn app.main:app --port 8088` · Tests: `pytest -q`
+
+
+## Auth (fail-closed contract)
+
+`AUTH_MODE=dev` (default): HS256 Bearer tokens (`MERIDIAN_DEV_JWT_SECRET`)
+plus an allowlisted `X-Dev-Role` header (`admin|operator|auditor`).
+`AUTH_MODE=keycloak`: RS256 Bearer tokens verified against the realm JWKS
+(`KEYCLOAK_ISSUER` / `KEYCLOAK_AUDIENCE` / `KEYCLOAK_JWKS_URL`; iss/aud/exp
+enforced, keys cached with refresh-on-unknown-kid). **Fail closed:** a
+keycloak deployment missing its OIDC configuration refuses to start — there
+is no silent fallback to dev auth, and `X-Dev-Role` is ignored in keycloak
+mode.

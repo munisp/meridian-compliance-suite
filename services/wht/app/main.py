@@ -23,10 +23,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from meridian_py.dev_jwt import AuthDep, problem
+from meridian_py.dev_jwt import AuthDep, problem, validate_auth_config
 from meridian_py.rulepack import PackRegistry
 
 from . import db, engine as wht_engine, workflow
+
+# Fail closed at startup when AUTH_MODE=keycloak is missing OIDC config.
+validate_auth_config()
 
 SERVICE = "wht"
 VERSION = "1.0.0"

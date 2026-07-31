@@ -1,5 +1,3 @@
-# einvoicing
-
 Meridian e-invoicing service: canonical kobo-integer invoice model, UBL 2.1 /
 Peppol BIS mapping, CSID signing, QR verification codes, MBS pre-clearance,
 B2C real-time reporting — now with full **NRS e-Invoicing parity** (official
@@ -82,3 +80,25 @@ Registration is fail-closed when `ENV`/`APP_ENV` indicates production.
 `nrs.einvoice.transmitted.v1`, `nrs.einvoice.confirmed.v1`,
 `nrs.einvoice.payment_status.v1` (new) plus the existing
 `nrs.mbs.*.v1` topics — all via the transactional outbox.
+
+## Auth (fail-closed contract)
+
+All endpoints sit behind `devjwt.Middleware` (SPEC §1.3):
+`AUTH_MODE=dev` accepts HS256 dev tokens and the allowlisted `X-Dev-Role`
+header; `AUTH_MODE=keycloak` verifies RS256 against the realm JWKS and
+**fails closed at startup** when `KEYCLOAK_ISSUER` is unset — no dev
+fallback. Tenant isolation is enforced at the object level: cross-tenant
+reads return 404 (no existence oracle), and a token with an empty
+`tenant_id` claim is denied (403) access to tenant-owned invoices.
+
+## QR verification code (M-4 honesty note)
+
+Every cleared invoice carries a QR payload
+`NRS1|<IRN>|<supplierTIN>|<payableKobo>|<ts>|<hmac12>` where the signature
+is **HMAC-SHA256 truncated to 12 hex chars (48 bits)**. The truncation is a
+deliberate size constraint (payload must fit a version-6 EC-M QR symbol,
+≤106 bytes); integrity relies on the secrecy of `QR_HMAC_KEY`, not on
+signature length, so the key must be KMS-managed and rotated per policy.
+**Fail closed:** when `AUTH_MODE` is anything other than `dev`, the service
+refuses to start without an explicit `QR_HMAC_KEY` — the hardcoded
+`meridian-dev-qr-key` default is dev-only.

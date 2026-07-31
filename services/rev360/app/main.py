@@ -27,9 +27,13 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from meridian_py.dev_jwt import AuthDep, issue_token, problem
+from meridian_py.dev_jwt import (AuthDep, issue_token, problem,
+                                 validate_auth_config)
 
 from . import core, worm
+
+# Fail closed at startup when AUTH_MODE=keycloak is missing OIDC config.
+validate_auth_config()
 
 SERVICE = "rev360"
 VERSION = "1.0.0"
@@ -59,7 +63,16 @@ def readyz():
 def sso_login(consultant: str = "consultant@meridian.local", role: str = "operator",
               tenant_id: str = ""):
     """Consultant OIDC dev SSO: simulates the OIDC authorization-code
-    callback and issues a session JWT (prod: Keycloak OIDC)."""
+    callback and issues a session JWT.
+
+    WARNING: DEV ONLY. This endpoint mints tokens with caller-chosen role and
+    tenant with no authentication; it exists solely for local development and
+    is disabled (404) unless AUTH_MODE=dev. In production, consultants sign
+    in via Keycloak OIDC and receive RS256 tokens from the realm."""
+    import os
+    if os.environ.get("AUTH_MODE", "dev") != "dev":
+        return problem(404, "not found",
+                       "dev SSO simulator is disabled unless AUTH_MODE=dev")
     if role not in ("admin", "operator", "auditor"):
         return problem(400, "bad role", "admin|operator|auditor")
     token = issue_token(sub=consultant, roles=[role], tenant_id=tenant_id)

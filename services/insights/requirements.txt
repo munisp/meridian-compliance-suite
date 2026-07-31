@@ -4,3 +4,4 @@ pydantic
 pyyaml
 httpx
 pytest
+pyjwt[crypto]

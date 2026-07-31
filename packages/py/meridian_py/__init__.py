@@ -5,5 +5,7 @@ Mirrors packages/shared (Go): event envelope (SPEC 1.1), dev JWT auth
 """
 
 from .envelope import new_envelope, ulid  # noqa: F401
-from .dev_jwt import issue_token, verify_token, require_auth  # noqa: F401
+from .dev_jwt import (issue_token, verify_token, require_auth,  # noqa: F401
+                      require_roles, validate_auth_config,
+                      verify_keycloak_token)
 from .rulepack import Pack, PackRegistry, evaluate  # noqa: F401

@@ -7,7 +7,7 @@ name = "meridian-py"
 version = "1.0.0"
 description = "Shared Python helpers for the Meridian compliance suite (envelope, dev JWT, rp-* loader)"
 requires-python = ">=3.11"
-dependencies = ["pyyaml", "pyjwt", "httpx", "fastapi"]
+dependencies = ["pyyaml", "pyjwt[crypto]", "httpx", "fastapi"]
 
 [tool.setuptools.packages.find]
 include = ["meridian_py*"]

@@ -8,10 +8,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/munisp/meridian-compliance-suite/packages/authx"
 )
 
 // ---------- Money: integer kobo only (SPEC §1.3). Never floats. ----------
@@ -244,12 +247,44 @@ func (s *Service) readyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"status": "ready", "packs_loaded": len(s.packs.Loaded())})
 }
 
-// auth implements SPEC §1.3: Bearer HS256 JWT; AUTH_MODE=dev also accepts X-Dev-Role.
+// auth implements SPEC §1.3: AUTH_MODE=keycloak verifies RS256 Bearer tokens
+// against the realm JWKS (KEYCLOAK_ISSUER / KEYCLOAK_AUDIENCE /
+// KEYCLOAK_JWKS_URL) via the shared authx verifier and FAILS CLOSED at route
+// registration (startup) when the OIDC config is missing — there is no dev
+// fallback. AUTH_MODE=dev (default) accepts HS256 Bearer tokens plus an
+// allowlisted X-Dev-Role header.
+var (
+	kcOnce     sync.Once
+	kcVerifier *authx.KeycloakVerifier
+)
+
 func (s *Service) auth(next http.HandlerFunc) http.HandlerFunc {
+	if s.cfg.AuthMode == "keycloak" {
+		// Runs at route registration (startup): refuse to serve when a
+		// keycloak deployment is missing its OIDC configuration.
+		kcOnce.Do(func() {
+			kcVerifier = authx.KeycloakVerifierFromEnv()
+			if kcVerifier == nil {
+				log.Fatal("AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset; refusing to start (no dev fallback)")
+			}
+			log.Printf("profile=prod component=auth (keycloak issuer=%s)", kcVerifier.Issuer)
+		})
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := r.Header.Get("Authorization")
 		if strings.HasPrefix(h, "Bearer ") {
-			c, err := verifyHS256(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret)
+			tok := strings.TrimPrefix(h, "Bearer ")
+			if s.cfg.AuthMode == "keycloak" {
+				c, err := kcVerifier.Verify(tok)
+				if err != nil {
+					writeProblem(w, 401, "unauthorized", err.Error())
+					return
+				}
+				r = r.WithContext(contextWith(r, &Claims{Sub: c.Sub, Roles: c.Roles, TenantID: c.TenantID, Exp: c.Exp}))
+				next(w, r)
+				return
+			}
+			c, err := verifyHS256(tok, s.cfg.JWTSecret)
 			if err != nil {
 				writeProblem(w, 401, "unauthorized", err.Error())
 				return
@@ -259,8 +294,9 @@ func (s *Service) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if s.cfg.AuthMode == "dev" {
-			if role := r.Header.Get("X-Dev-Role"); role != "" {
-				r = r.WithContext(contextWith(r, &Claims{Sub: "dev-" + role, Roles: []string{role}}))
+			switch role := r.Header.Get("X-Dev-Role"); role {
+			case "admin", "operator", "auditor":
+				r = r.WithContext(contextWith(r, &Claims{Sub: "dev-" + role, Roles: []string{role}, TenantID: r.Header.Get("X-Tenant-ID")}))
 				next(w, r)
 				return
 			}

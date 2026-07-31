@@ -23,10 +23,13 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from meridian_py.dev_jwt import AuthDep, problem
+from meridian_py.dev_jwt import AuthDep, problem, validate_auth_config
 from meridian_py.rulepack import PackRegistry
 
 from . import cbcr, graph, interest, tpdocs
+
+# Fail closed at startup when AUTH_MODE=keycloak is missing OIDC config.
+validate_auth_config()
 
 SERVICE = "tp-cbcr"
 VERSION = "1.0.0"
