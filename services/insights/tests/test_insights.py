@@ -61,6 +61,31 @@ def test_i10_no_penalty_when_on_time():
     assert body["total_kobo"] == 0
 
 
+def test_i10_wht_late_payment_is_10pct_gazette_aligned():
+    # Audit fix: WHT failure-to-deduct/late-payment was 40% ("NTAA s.74",
+    # wrong section); gazette-aligned NTAA s.65 rate is 10% + MPR interest.
+    body = client.post("/v1/insights/penalties", json={
+        "tax_type": "WHT", "due_date": "2026-02-21",
+        "paid_date": "2026-03-21", "tax_kobo": 10_000_000}).json()
+    assert body["late_payment_kobo"] == 10_000_000 * 1000 // 10_000
+    assert body["interest_kobo"] > 0
+
+
+def test_i10_registration_penalty_tiers():
+    # NTAA s.100(1): N50k first month + N25k per subsequent month
+    body = client.post("/v1/insights/penalties/registration", json={
+        "months_unregistered": 3, "as_of": "2026-03-01"}).json()
+    assert body["failure_to_register_kobo"] == 5_000_000 + 2 * 2_500_000
+    # NTAA s.100(2): N5m per unregistered-person engagement
+    body2 = client.post("/v1/insights/penalties/registration", json={
+        "unregistered_contract_engagements": 2, "as_of": "2026-03-01"}).json()
+    assert body2["unregistered_contract_kobo"] == 2 * 500_000_000_00
+    # fail-closed before NTAA effective date
+    r = client.post("/v1/insights/penalties/registration", json={
+        "months_unregistered": 1, "as_of": "2025-06-01"})
+    assert r.status_code == 422
+
+
 def test_i11_reminder_uses_pack_calendar_and_history():
     body = client.post("/v1/insights/reminders", json={
         "tenant_id": "t1", "tax": "VAT", "period": "2026-02-15"}).json()

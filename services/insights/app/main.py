@@ -70,6 +70,27 @@ def post_penalties(body: PenaltyIn):
     return res.as_dict()
 
 
+# I10b registration penalties (NTAA 2025 s.100)
+class RegistrationPenaltyIn(BaseModel):
+    months_unregistered: int = 0
+    unregistered_contract_engagements: int = 0
+    as_of: str | None = None
+
+
+@app.post("/v1/insights/penalties/registration")
+def post_registration_penalties(body: RegistrationPenaltyIn):
+    try:
+        when = date.fromisoformat(body.as_of) if body.as_of else date.today()
+        return {
+            "failure_to_register_kobo": penalties.registration_penalty(
+                body.months_unregistered, when),
+            "unregistered_contract_kobo": penalties.unregistered_contract_penalty(
+                body.unregistered_contract_engagements, when),
+        }
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
 # I11 reminders
 class ReminderIn(BaseModel):
     tenant_id: str
