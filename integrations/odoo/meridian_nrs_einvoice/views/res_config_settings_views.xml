@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Settings panel under Invoicing settings -->
+    <record id="res_config_settings_view_form_nrs" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.nrs</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="account.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//app[@name='account']" position="inside">
+                <block title="Meridian NRS e-Invoicing" name="meridian_nrs">
+                    <setting string="NRS e-invoice clearance via Meridian">
+                        <div class="content-group">
+                            <div class="row mt16">
+                                <label for="meridian_nrs_base_url"
+                                       class="col-lg-3 o_light_label"/>
+                                <field name="meridian_nrs_base_url"
+                                       class="oe_inline"
+                                       placeholder="https://einvoicing.meridian.example"/>
+                            </div>
+                            <div class="row">
+                                <label for="meridian_nrs_api_key"
+                                       class="col-lg-3 o_light_label"/>
+                                <field name="meridian_nrs_api_key"
+                                       class="oe_inline" password="True"/>
+                            </div>
+                            <div class="row">
+                                <label for="meridian_nrs_service_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <field name="meridian_nrs_service_id"
+                                       class="oe_inline" placeholder="94ND90NR"/>
+                            </div>
+                            <div class="row">
+                                <label for="meridian_nrs_business_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <field name="meridian_nrs_business_id"
+                                       class="oe_inline"/>
+                            </div>
+                            <div class="row">
+                                <label for="meridian_nrs_webhook_secret"
+                                       class="col-lg-3 o_light_label"/>
+                                <field name="meridian_nrs_webhook_secret"
+                                       class="oe_inline" password="True"/>
+                            </div>
+                        </div>
+                        <div class="content-group">
+                            <div class="mt16">
+                                <field name="meridian_nrs_auto_submit"/>
+                                <label for="meridian_nrs_auto_submit"/>
+                            </div>
+                        </div>
+                    </setting>
+                </block>
+            </xpath>
+        </field>
+    </record>
+</odoo>

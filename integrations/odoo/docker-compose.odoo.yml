@@ -1,0 +1,45 @@
+# docker-compose.odoo.yml — local Odoo 17 UAT environment for the
+# meridian_nrs_einvoice addon. OPTIONAL, for manual UAT only.
+#
+# Usage (from the repo root):
+#   docker compose -f integrations/odoo/docker-compose.odoo.yml up -d
+#   # Odoo: http://localhost:8069  (create DB, install Apps -> Meridian NRS
+#   # e-Invoicing, then Settings -> Meridian NRS e-Invoicing)
+#
+# The addon and the pure-Python client are bind-mounted into the container;
+# meridian_odoo_client is added to PYTHONPATH so the import guard resolves.
+# Point meridian_nrs.base_url at a reachable Meridian einvoicing service
+# (e.g. the services/einvoicing binary, see its README) or a mock.
+
+services:
+  odoo-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+    volumes:
+      - odoo-db-data:/var/lib/postgresql/data
+
+  odoo:
+    image: odoo:17.0
+    depends_on:
+      - odoo-db
+    ports:
+      - "8069:8069"
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo
+      # make the pure-Python client importable inside Odoo
+      PYTHONPATH: /mnt/extra-addons/client
+    volumes:
+      - odoo-data:/var/lib/odoo
+      # addon mounted into the addons path
+      - ./meridian_nrs_einvoice:/mnt/extra-addons/meridian_nrs_einvoice:ro
+      # client package mounted for PYTHONPATH import
+      - ./meridian_odoo_client:/mnt/extra-addons/client/meridian_odoo_client:ro
+
+volumes:
+  odoo-db-data:
+  odoo-data:
