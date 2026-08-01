@@ -1,6 +1,13 @@
+# Odoo 17/18 compatibility: Odoo requires the manifest "version" to start
+# with the running series ("17.0." on Odoo 17, "18.0." on Odoo 18) and
+# refuses to install otherwise. The addon code itself is series-tolerant
+# (no version-gated APIs; see docs/ERP-ODOO.md "Odoo 17/18 compatibility").
+# When deploying on Odoo 18, change ONLY the prefix to "18.0.1.1.0" — no
+# other manifest key changes are required. tools/test_addon_structure.py
+# asserts the prefix is 17.0 or 18.0.
 {
     "name": "Meridian NRS e-Invoicing",
-    "version": "17.0.1.0.0",
+    "version": "17.0.1.1.0",
     "category": "Accounting/Accounting",
     "summary": "Nigeria NRS e-invoice clearance for customer invoices via the "
                "Meridian einvoicing service (IRN, 8-step lifecycle, QR, HMAC "
@@ -15,8 +22,9 @@ receives HMAC-SHA256-signed lifecycle webhooks, pushes payment status by IRN,
 and retries failures from an error queue.
 
 Requires the pure-Python package ``meridian_odoo_client`` on the Odoo host
-PYTHONPATH (shipped alongside this addon in integrations/odoo/). Tested
-against Odoo 17; Odoo 18 compatible API. See docs/ERP-ODOO.md.""",
+PYTHONPATH (shipped alongside this addon in integrations/odoo/). Supports
+Odoo 17 and Odoo 18 (see docs/ERP-ODOO.md, "Odoo 17/18 compatibility":
+manifest version prefix, cron numbercall, settings-view anchors).""",
     "author": "Meridian Compliance Suite",
     "license": "LGPL-3",
     "depends": ["account"],

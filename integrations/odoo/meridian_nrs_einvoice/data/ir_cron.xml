@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!--
+      Odoo 17/18 compatibility note:
+      `numbercall` is intentionally OMITTED (it used to be set to -1, the
+      legacy "run forever" idiom). Since Odoo 17 the scheduler treats a
+      missing/NULL numbercall as unlimited and `numbercall = -1` is
+      deprecated; in Odoo 18 builds the column is candidate for removal and
+      the `doall` flag is ignored for non-missed executions. Omitting the
+      field is the version-tolerant form; if a future build requires an
+      explicit repeat-forever flag, use `doall=True` together with no
+      numbercall (see comment below).
+    -->
     <data noupdate="1">
         <!-- Retry queued NRS submissions (error queue, linear backoff) -->
         <record id="ir_cron_nrs_process_queue" model="ir.cron">
@@ -9,7 +20,9 @@
             <field name="code">model._cron_nrs_process_queue()</field>
             <field name="interval_number">15</field>
             <field name="interval_type">minutes</field>
-            <field name="numbercall">-1</field>
+            <!-- numbercall omitted: repeat indefinitely (17/18 tolerant);
+                 doall stays default False so missed runs are not replayed
+                 in bulk after downtime. -->
             <field name="active">True</field>
         </record>
 
@@ -21,7 +34,7 @@
             <field name="code">model._cron_nrs_sync_payment_status()</field>
             <field name="interval_number">1</field>
             <field name="interval_type">hours</field>
-            <field name="numbercall">-1</field>
+            <!-- numbercall omitted: repeat indefinitely (17/18 tolerant). -->
             <field name="active">True</field>
         </record>
     </data>

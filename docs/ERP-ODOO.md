@@ -8,8 +8,8 @@ service (`services/einvoicing` in this repo).
 
 | Component | Status |
 |---|---|
-| `meridian_odoo_client` (mapping, IRN, kobo rounding, HMAC, lifecycle) | **REAL, unit-tested** — 25 pytest tests, all green, no Odoo required |
-| `meridian_nrs_einvoice` Odoo addon (models/views/controller) | **REAL code, NOT executed in CI** — requires a live Odoo 17/18 host; syntax-compiled and XML-validated here. Import-guarded: the addon loads but raises a clear `UserError` on submission if `meridian_odoo_client` is not on the Odoo host PYTHONPATH |
+| `meridian_odoo_client` (mapping, IRN, kobo rounding, HMAC, lifecycle) | **REAL, unit-tested** — 41 pytest tests, all green, no Odoo required |
+| `meridian_nrs_einvoice` Odoo addon (models/views/controller) | **REAL code, NOT executed against a live Odoo in CI** — covered by an 18-test structural harness (manifest parse, security CSV, XML lint, compile, route decorators, golden export-dict payloads); requires a live Odoo 17/18 host for runtime UAT. Import-guarded: the addon loads but raises a clear `UserError` on submission if `meridian_odoo_client` is not on the Odoo host PYTHONPATH |
 | End-to-end clearance against an NRS sandbox | **REQUIRES LIVE SYSTEMS** — needs a running Meridian einvoicing service (or NRS sandbox credentials) reachable from the Odoo host. Not simulated |
 | `docker-compose.odoo.yml` | UAT convenience only; optional |
 
@@ -64,7 +64,7 @@ Odoo 17/18                                        Meridian einvoicing svc
 | `invoice_date` | `issue_date` (+ IRN date stamp) | |
 | `invoice_date_due` | `due_date`, `payment_means[].payment_due_date` | |
 | `move_type` | `invoice_type_code` | `out_invoice`→380, `out_refund`→381 |
-| `currency_id.name` | `document_currency_code` | default NGN |
+| `currency_id.name` | `document_currency_code` | default NGN; **non-NGN invoices are rejected** with a clear mapping error (NRS clearance is NGN-denominated) |
 | `company_id.partner_id.name/.vat/.email/.phone/.street/.city/.zip/.state_id.code/.country_id.code` | `accounting_supplier_party` | **`vat` = Nigerian TIN (required)** |
 | `partner_id` same fields | `accounting_customer_party` | TIN optional for B2C |
 | `invoice_line_ids.name` | `invoice_line[].item.name` | |
@@ -79,6 +79,73 @@ Odoo 17/18                                        Meridian einvoicing svc
 | `narration` / `ref` | `note` / `order_reference` | |
 | — | `payment_means_code` | fixed `30` (credit transfer) |
 | — | `business_id` | from settings |
+
+## Odoo 17/18 compatibility
+
+The addon supports **Odoo 17 and Odoo 18** with a single codebase:
+
+- **Manifest version prefix**: Odoo refuses to install a module whose
+  `version` does not start with the running series. The shipped manifest
+  is `17.0.1.1.0`; for an Odoo 18 deployment change **only** the prefix to
+  `18.0.1.1.0` (see the header comment in `__manifest__.py`). No other
+  manifest key differs between series. The structural harness accepts both
+  prefixes so a renamed manifest stays green.
+- **Cron records**: the legacy `numbercall = -1` ("run forever") idiom is
+  removed. `numbercall` is omitted entirely, which Odoo 17 and 18 both
+  treat as unlimited; `doall` is left at its default (`False`) so missed
+  runs are not bulk-replayed after downtime. A harness test fails if
+  `numbercall` reappears in `data/ir_cron.xml`.
+- **Settings view anchors**: `views/res_config_settings_views.xml` splits
+  the inherit into a version-sensitive primary anchor
+  (`//app[@name='account']` on `account.res_config_settings_view_form`)
+  and a build-agnostic secondary xpath that fills the inserted block via
+  the `//setting[...]` structure. Odoo 17.x builds that render the
+  settings form as flat `//setting` groups only need the **first** xpath
+  repointed (documented in the file header comment); never enable two
+  anchors at once (double insert).
+- **View syntax**: all views use the post-17 inline `invisible="..."`
+  expression syntax (the pre-17 `attrs` dict was removed in Odoo 18) and
+  the `<list>` root tag (`<tree>` was removed in Odoo 18). Fallback anchors
+  for renamed search filters are documented in
+  `views/account_move_views.xml`.
+- **Python API**: the addon uses only APIs stable across 17/18
+  (`fields`, `api.model` crons, `http.route(type='http', auth='none',
+  csrf=False)`, `ir.config_parameter`, `tracking=True`). No version-gated
+  imports.
+
+## What remains for live-Odoo UAT (exact checklist)
+
+Everything below **requires a running Odoo host** and cannot be simulated
+in CI; each item is the exact verification to perform:
+
+1. **Install on Odoo 17**: module installs cleanly; settings panel renders
+   under Settings → Invoicing → *Meridian NRS e-Invoicing*; both cron jobs
+   appear under Settings → Technical → Automation → Scheduled Actions with
+   "Number of Calls" empty (unlimited).
+2. **Install on Odoo 18**: same checks with the `18.0.` manifest prefix;
+   confirm the settings block lands inside the Invoicing app container
+   (if the build renders flat settings, apply the documented xpath
+   fallback and re-verify).
+3. **Smoke invoice**: post a customer invoice (VAT 7.5%) with
+   `auto_submit` on → IRN `INV…-SERVICEID-YYYYMMDD` stored,
+   `nrs_clearance_status` advances, QR payload populated; payload visible
+   in *NRS Submission Queue*.
+4. **Webhook round-trip**: register the webhook against the service,
+   confirm a signed `transmitted`/`confirmed` delivery advances the
+   status, a tampered body is rejected 401, and an unknown IRN returns
+   200/ignored without error.
+5. **Credit note**: post + submit an `out_refund`; service receives
+   `invoice_type_code = 381` with positive amounts and its own IRN.
+6. **Error queue**: force a failure (stop the service), watch the log row
+   requeue with 15-min linear backoff, restart the service, confirm the
+   queue cron drains it within 5 attempts.
+7. **Payment sync**: pay a cleared invoice; within one cron hour the
+   service shows `payment_status=PAID` for that IRN.
+8. **Access control**: as a Billing user (no manager group), the queue is
+   read/write but not deletable; as a non-accounting user the NRS tab and
+   menu are hidden.
+9. **Multi-company** (if used): parameters are database-global — confirm
+   this is acceptable or duplicate the addon per DB before go-live.
 
 ## Setup guide
 
@@ -128,7 +195,7 @@ up -d` (Odoo 17 on :8069 with the addon and client mounted).
 
 ```bash
 cd integrations/odoo
-python3 -m pytest meridian_odoo_client/tests -q   # 25 tests
+python3 -m pytest meridian_odoo_client/tests tools -q   # 59 tests
 ```
 
 Covers: Odoo-invoice-dict → NRS payload round-trip validated against the Go
@@ -138,3 +205,21 @@ note 381, idempotent IRN reuse), client calls with mocked transport (auth
 header, 422 error aggregation, PATCH by IRN, webhook registration), webhook
 HMAC accept/reject (wrong secret, tampered body, empty inputs), and
 lifecycle transition legality (happy path, fail→retry, illegal jumps).
+
+Mapper edge cases (`test_mapper_edge_cases.py`): x.xx5 rounding boundary
+sweep (incl. float-hostile 2.675→268 kobo and string inputs), bps-rounding
+boundaries, missing/blank supplier TIN → aggregated clear errors, customer
+TIN optional (B2C), >99-line exports (150/101 lines, no pagination
+truncation), credit-note sign handling (positive amounts, negative amounts
+rejected), foreign currency rejected with a clear error (NRS clearance is
+NGN-only), `ngn` case-insensitive acceptance.
+
+Addon structural harness (`tools/test_addon_structure.py`, 18 tests, no
+Odoo runtime): manifest parses via `ast.literal_eval` with a 17.0/18.0
+version prefix and existing data files; security CSV header/row lint; all
+XML well-formed with unique record ids and non-empty inherit_id refs and
+xpath exprs; cron XML free of the deprecated `numbercall` idiom; all addon
+Python compiles; webhook `@http.route` decorators carry
+`type/auth='none'/methods=['POST']/csrf=False`; and three golden
+`_nrs_export_dict` payloads map correctly through `build_nrs_invoice`
+(multi-tax-group, zero-rated, foreign-currency rejection).
