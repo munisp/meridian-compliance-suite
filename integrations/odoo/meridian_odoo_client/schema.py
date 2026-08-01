@@ -188,6 +188,15 @@ def build_nrs_invoice(odoo_invoice: dict, service_id: str, business_id: str) -> 
         errors.append("invoice_type_code %r not in catalog" % type_code)
 
     currency = (odoo_invoice.get("currency") or "NGN").upper()
+    if currency != "NGN":
+        # NRS clearance is denominated in NGN; all money math below is
+        # integer kobo. A foreign-currency invoice must not be silently
+        # mislabeled: reject with a clear, actionable mapping error.
+        errors.append(
+            "document_currency_code %r unsupported: NRS clearance requires "
+            "NGN; foreign-currency invoices must be issued in NGN (or "
+            "converted) before clearance" % currency
+        )
 
     lines = odoo_invoice.get("lines") or []
     if not lines:
