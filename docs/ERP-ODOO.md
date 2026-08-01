@@ -64,7 +64,7 @@ Odoo 17/18                                        Meridian einvoicing svc
 | `invoice_date` | `issue_date` (+ IRN date stamp) | |
 | `invoice_date_due` | `due_date`, `payment_means[].payment_due_date` | |
 | `move_type` | `invoice_type_code` | `out_invoice`→380, `out_refund`→381 |
-| `currency_id.name` | `document_currency_code` | default NGN |
+| `currency_id.name` | `document_currency_code` | default NGN; **non-NGN invoices are rejected** with a clear mapping error (NRS clearance is NGN-denominated) |
 | `company_id.partner_id.name/.vat/.email/.phone/.street/.city/.zip/.state_id.code/.country_id.code` | `accounting_supplier_party` | **`vat` = Nigerian TIN (required)** |
 | `partner_id` same fields | `accounting_customer_party` | TIN optional for B2C |
 | `invoice_line_ids.name` | `invoice_line[].item.name` | |
