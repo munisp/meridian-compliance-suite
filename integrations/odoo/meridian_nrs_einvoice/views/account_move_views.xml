@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Invoice form: NRS tab -->
+    <!-- Invoice form: NRS tab.
+         Odoo 17/18 compatibility: uses the post-17 `invisible="..."`
+         inline-expression syntax (valid in 17 and 18; the pre-17 `attrs`
+         dict is removed in 18). Anchors `//header` and `//notebook` are
+         stable across account.view_move_form in 17.x/18; if a custom
+         build drops the <header> (e.g. simplified invoice form), repoint
+         the button xpath to `//sheet` position="before". -->
     <record id="view_move_form_inherit_nrs" model="ir.ui.view">
         <field name="name">account.move.form.nrs</field>
         <field name="model">account.move</field>
@@ -46,7 +52,11 @@
         </field>
     </record>
 
-    <!-- Invoice list: clearance status column -->
+    <!-- Invoice list: clearance status column.
+         Odoo 17/18: <list> root tag works in both (17 accepts both
+         <tree>/<list>, 18 removed <tree>); account.view_invoice_tree is
+         present in both versions. `optional` fields render via the list
+         column picker in 17+. -->
     <record id="view_invoice_tree_inherit_nrs" model="ir.ui.view">
         <field name="name">account.move.list.nrs</field>
         <field name="model">account.move</field>
@@ -59,7 +69,14 @@
         </field>
     </record>
 
-    <!-- Filter: NRS status grouping on customer invoices -->
+    <!-- Filter: NRS status grouping on customer invoices.
+         Odoo 17/18 compatibility: anchors on filter[@name='payment'] and
+         groupby[@name='payment_state'], which exist in
+         account.view_account_invoice_filter in both versions. Defensive
+         fallbacks if a downstream build renamed them:
+           filter anchor:   //filter[@name='unpaid']   position="after"
+           groupby anchor:  //filter[last()]           position="after"
+         Only one anchor per insertion may be live at a time. -->
     <record id="view_account_invoice_filter_nrs" model="ir.ui.view">
         <field name="name">account.move.search.nrs</field>
         <field name="model">account.move</field>
