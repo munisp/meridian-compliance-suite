@@ -33,6 +33,7 @@ type Service struct {
 	cfg    Config
 	store  *Store
 	rel    *RelationChecker
+	perm   *PermifyClient // non-nil when PERMIFY_URL selects live authz (P0)
 	worm   WORMClient
 	notify Notifier
 	stopCh chan struct{}
@@ -69,6 +70,12 @@ func main() {
 		rel:  NewRelationChecker(cfg.DataDir + "/relations.json"),
 		worm: worm, notify: notify, stopCh: make(chan struct{}),
 	}
+	// P0: Permify centralized authz — fail-closed in prod without PERMIFY_URL.
+	perm, err := wirePermify(cfg.AuthMode)
+	if err != nil {
+		log.Fatalf("component=case-mgmt FATAL: %v", err)
+	}
+	svc.perm = perm
 	// H2: AUTH_MODE=keycloak selects RS256/JWKS verification.
 	// FAIL CLOSED (audit fix H-1): a keycloak deployment missing its OIDC
 	// configuration refuses to boot rather than silently falling back to the

@@ -66,7 +66,7 @@ func (s *Service) canReadMatter(r *http.Request, m *Matter) bool {
 	if roleOf(r) == "admin" || roleOf(r) == "auditor" {
 		return true
 	}
-	return s.rel.Check("matter:"+m.ID, "read", subjectOf(r), s.store)
+	return s.checkRel(r, "matter:"+m.ID, "read", subjectOf(r))
 }
 
 func (s *Service) handleUpdateMatter(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +75,7 @@ func (s *Service) handleUpdateMatter(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 404, "not found", "matter not found")
 		return
 	}
-	if roleOf(r) != "admin" && !s.rel.Check("matter:"+m.ID, "write", subjectOf(r), s.store) {
+	if roleOf(r) != "admin" && !s.checkRel(r, "matter:"+m.ID, "write", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "matter#counsel relation required")
 		return
 	}
@@ -123,7 +123,7 @@ func (s *Service) handleUploadDoc(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 404, "not found", "matter not found")
 		return
 	}
-	if roleOf(r) != "admin" && !s.rel.Check("matter:"+m.ID, "write", subjectOf(r), s.store) {
+	if roleOf(r) != "admin" && !s.checkRel(r, "matter:"+m.ID, "write", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "matter#counsel relation required")
 		return
 	}
@@ -197,7 +197,7 @@ func (s *Service) handleListDocs(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 403, "forbidden", "no matter relation")
 		return
 	}
-	isCounsel := roleOf(r) == "admin" || s.rel.Check("matter:"+m.ID, "write", subjectOf(r), s.store)
+	isCounsel := roleOf(r) == "admin" || s.checkRel(r, "matter:"+m.ID, "write", subjectOf(r))
 	docs := s.store.ListDocuments(m.ID, isCounsel)
 	writeJSON(w, 200, map[string]any{"documents": docs, "privileged_visible": isCounsel})
 }
@@ -208,7 +208,7 @@ func (s *Service) handleGetDoc(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 404, "not found", "document not found")
 		return
 	}
-	if roleOf(r) != "admin" && !s.rel.Check("doc:"+d.ID, "read", subjectOf(r), s.store) {
+	if roleOf(r) != "admin" && !s.checkRel(r, "doc:"+d.ID, "read", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "doc#privileged restricts access")
 		return
 	}
@@ -221,7 +221,7 @@ func (s *Service) handleGetDocContent(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 404, "not found", "document not found")
 		return
 	}
-	if roleOf(r) != "admin" && !s.rel.Check("doc:"+d.ID, "read", subjectOf(r), s.store) {
+	if roleOf(r) != "admin" && !s.checkRel(r, "doc:"+d.ID, "read", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "doc#privileged restricts access")
 		return
 	}
@@ -236,7 +236,7 @@ func (s *Service) handleCreateDeadline(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 404, "not found", "matter not found")
 		return
 	}
-	if roleOf(r) != "admin" && !s.rel.Check("matter:"+m.ID, "write", subjectOf(r), s.store) {
+	if roleOf(r) != "admin" && !s.checkRel(r, "matter:"+m.ID, "write", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "matter#counsel relation required")
 		return
 	}
@@ -276,7 +276,7 @@ func (s *Service) handleUpdateDeadline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, _ := s.store.GetMatter(dl.MatterID)
-	if m != nil && roleOf(r) != "admin" && !s.rel.Check("matter:"+m.ID, "write", subjectOf(r), s.store) {
+	if m != nil && roleOf(r) != "admin" && !s.checkRel(r, "matter:"+m.ID, "write", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "matter#counsel relation required")
 		return
 	}
@@ -315,7 +315,7 @@ func (s *Service) handlePortalMatters(w http.ResponseWriter, r *http.Request) {
 	matters := s.store.ListMatters("", "", "")
 	out := []*Matter{}
 	for _, m := range matters {
-		if m.ClientID == subj || s.rel.Check("matter:"+m.ID, "read", subjectOf(r), s.store) {
+		if m.ClientID == subj || s.checkRel(r, "matter:"+m.ID, "read", subjectOf(r)) {
 			out = append(out, m)
 		}
 	}
@@ -329,7 +329,7 @@ func (s *Service) handlePortalMatter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subj := strings.TrimPrefix(subjectOf(r), "user:")
-	if m.ClientID != subj && !s.rel.Check("matter:"+m.ID, "read", subjectOf(r), s.store) && roleOf(r) != "admin" {
+	if m.ClientID != subj && !s.checkRel(r, "matter:"+m.ID, "read", subjectOf(r)) && roleOf(r) != "admin" {
 		writeProblem(w, 403, "forbidden", "portal shows your matters only")
 		return
 	}
@@ -351,15 +351,25 @@ func (s *Service) handleRelCheck(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 400, "bad request", err.Error())
 		return
 	}
-	allowed := s.rel.Check(req.Entity, req.Permission, req.Subject, s.store)
-	writeJSON(w, 200, map[string]any{"allowed": allowed, "checker": "dev-file-backed"})
+	allowed := s.checkRel(r, req.Entity, req.Permission, req.Subject)
+	writeJSON(w, 200, map[string]any{"allowed": allowed, "checker": s.relCheckerMode()})
 }
 
 func (s *Service) handleRelList(w http.ResponseWriter, r *http.Request) {
+	if s.perm != nil {
+		writeProblem(w, 501, "not implemented",
+			"PERMIFY_URL is set: relation tuples live in the Permify server; the dev file-backed store is disabled")
+		return
+	}
 	writeJSON(w, 200, map[string]any{"tuples": s.rel.Tuples()})
 }
 
 func (s *Service) handleRelGrant(w http.ResponseWriter, r *http.Request) {
+	if s.perm != nil {
+		writeProblem(w, 501, "not implemented",
+			"PERMIFY_URL is set: write relationship tuples to the Permify server (dev file-backed grants disabled)")
+		return
+	}
 	var t RelationTuple
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&t); err != nil {
 		writeProblem(w, 400, "bad request", err.Error())
@@ -370,6 +380,11 @@ func (s *Service) handleRelGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRelRevoke(w http.ResponseWriter, r *http.Request) {
+	if s.perm != nil {
+		writeProblem(w, 501, "not implemented",
+			"PERMIFY_URL is set: delete relationship tuples on the Permify server (dev file-backed revokes disabled)")
+		return
+	}
 	var t RelationTuple
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&t); err != nil {
 		writeProblem(w, 400, "bad request", err.Error())
@@ -390,7 +405,7 @@ func (s *Service) handleEvidencePack(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 404, "not found", "matter not found")
 		return
 	}
-	if roleOf(r) != "admin" && !s.rel.Check("matter:"+m.ID, "write", subjectOf(r), s.store) {
+	if roleOf(r) != "admin" && !s.checkRel(r, "matter:"+m.ID, "write", subjectOf(r)) {
 		writeProblem(w, 403, "forbidden", "matter#counsel relation required")
 		return
 	}

@@ -1,0 +1,20 @@
+// Case management relations (used by compliance-suite case-mgmt).
+// Permission names match the case-mgmt check call sites exactly
+// (matter read/write, doc read/privileged/share) — guarded by schema_test.go.
+entity user {}
+
+entity matter {
+    relation counsel @user
+    relation client @user
+    relation supervising_partner @user
+    permission read = counsel + client + supervising_partner
+    permission write = counsel + supervising_partner
+}
+
+entity doc {
+    relation matter @matter
+    relation owner @user
+    permission privileged = owner + matter.counsel
+    permission read = owner + matter.read
+    permission share = owner + matter.supervising_partner
+}
