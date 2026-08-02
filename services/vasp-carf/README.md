@@ -10,7 +10,7 @@ rp-carf-schema validation, rp-nta-vasp-duties evaluation.
 
 ## Run (dev, zero external deps)
 ```sh
-go build . && ./vasp-carf          # PORT=8110, AUTH_MODE=dev
+go build . && ./vasp-carf          # PORT=8116, AUTH_MODE=dev
 ```
 
 ## Config: PORT, AUTH_MODE, MERIDIAN_DEV_JWT_SECRET, RP_REGISTRY_URL, REG_WATCH_URL, DATA_DIR
