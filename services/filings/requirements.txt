@@ -3,3 +3,4 @@ uvicorn
 pydantic
 httpx
 pytest
+psycopg[binary]>=3.1

@@ -313,7 +313,8 @@ def test_deemed_upheld_after_90_days_tat_referral():
     events = s.tick(date(2026, 6, 9))  # day after 90-day deadline
     ref = next(e for e in events if e.get("referral_id"))
     assert ref["basis"].startswith("objection deemed upheld")
-    assert obj["status"] == "deemed_upheld"
+    # durable store returns copies; re-fetch the persisted objection
+    assert s._docs.get("objections", obj["objection_id"])["status"] == "deemed_upheld"
     # deemed upheld -> assessment reduced to admitted amount
     assert s.get(a["assessment_id"])["amount_kobo"] == 2_000_000_00
     assert s.tat_referrals()[0]["referral_id"] == ref["referral_id"]

@@ -20,6 +20,8 @@ from __future__ import annotations
 import itertools
 from datetime import date, timedelta
 
+from . import store as _store
+
 OBJECTION_WINDOW_DAYS = 30      # NTAA s.41
 DECISION_WINDOW_DAYS = 90       # NTAA s.41: authority must decide; else deemed upheld
 SERVICE_CHANNELS = ("personal", "registered_post", "electronic")  # s.40
@@ -33,12 +35,23 @@ class AssessmentError(ValueError):
 
 
 class AssessmentStore:
-    """In-memory lifecycle store (insights-style backend; swap for DB)."""
+    """Lifecycle store, durable via app.store.DocStore (Postgres in prod,
+    in-memory fallback in dev)."""
 
-    def __init__(self):
-        self._assessments: dict[str, dict] = {}
-        self._objections: dict[str, dict] = {}
-        self._tat_referrals: list[dict] = []
+    def __init__(self, docs: "_store.DocStore | None" = None):
+        self._docs = docs if docs is not None else _store.DocStore()
+        # re-seed the shared ID counter past any durably stored ids
+        for coll, field, prefix in (("assessments", "assessment_id", "ASM-"),
+                                    ("objections", "objection_id", "OBJ-"),
+                                    ("tat_referrals", "referral_id", "TAT-")):
+            _store.seed_counter(_ids, _store.max_id_suffix(
+                self._docs, coll, field, prefix))
+
+    def _put_asm(self, a: dict) -> None:
+        self._docs.put("assessments", a["assessment_id"], a)
+
+    def _put_obj(self, obj: dict) -> None:
+        self._docs.put("objections", obj["objection_id"], obj)
 
     # --- issuance -------------------------------------------------------
     def issue(self, tin: str, tax_type: str, period: str, kind: str,
@@ -63,17 +76,17 @@ class AssessmentStore:
             "history": [{"at": served_at.isoformat(), "event": "issued",
                          "kind": kind, "amount_kobo": int(amount_kobo)}],
         }
-        self._assessments[rec["assessment_id"]] = rec
+        self._put_asm(rec)
         return rec
 
     def get(self, assessment_id: str) -> dict | None:
-        return self._assessments.get(assessment_id)
+        return self._docs.get("assessments", assessment_id)
 
     # --- objection (s.41) ------------------------------------------------
     def object(self, assessment_id: str, grounds: str,
                admitted_amount_kobo: int, paid_admitted_kobo: int,
                filed_at: date) -> dict:
-        a = self._assessments.get(assessment_id)
+        a = self._docs.get("assessments", assessment_id)
         if a is None:
             raise AssessmentError("unknown assessment")
         if a["status"] not in ("open",):
@@ -100,7 +113,7 @@ class AssessmentStore:
             "decision_deadline": (filed_at + timedelta(days=DECISION_WINDOW_DAYS)).isoformat(),
             "status": "pending",
         }
-        self._objections[obj["objection_id"]] = obj
+        self._put_obj(obj)
         a["status"] = "objected"
         a["objection_id"] = obj["objection_id"]
         a["history"].append({"at": filed_at.isoformat(), "event": "objection_filed",
@@ -109,12 +122,13 @@ class AssessmentStore:
             a["history"].append({"at": filed_at.isoformat(),
                                  "event": "partial_payment_admitted",
                                  "amount_kobo": paid})
+        self._put_asm(a)
         return obj
 
     def decide(self, objection_id: str, outcome: str, decided_at: date,
                revised_amount_kobo: int | None = None) -> dict:
         """outcome: upheld (taxpayer wins) | partially_upheld | rejected."""
-        obj = self._objections.get(objection_id)
+        obj = self._docs.get("objections", objection_id)
         if obj is None:
             raise AssessmentError("unknown objection")
         if obj["status"] != "pending":
@@ -123,7 +137,7 @@ class AssessmentStore:
             raise AssessmentError("decision out of time; objection is deemed upheld")
         if outcome not in ("upheld", "partially_upheld", "rejected"):
             raise AssessmentError(f"unknown outcome {outcome!r}")
-        a = self._assessments[obj["assessment_id"]]
+        a = self._docs.get("assessments", obj["assessment_id"])
         if outcome == "partially_upheld":
             if revised_amount_kobo is None or not (0 <= int(revised_amount_kobo) < a["amount_kobo"]):
                 raise AssessmentError("partially_upheld requires a lower revised amount")
@@ -135,6 +149,8 @@ class AssessmentStore:
         a["status"] = "final_and_conclusive"
         a["history"].append({"at": decided_at.isoformat(), "event": "objection_decided",
                              "outcome": outcome})
+        self._put_obj(obj)
+        self._put_asm(a)
         return obj
 
     # --- clocks ----------------------------------------------------------
@@ -143,17 +159,18 @@ class AssessmentStore:
         to final-and-conclusive; deem undecided objections past 90 days
         upheld and emit a TAT referral record."""
         events = []
-        for a in self._assessments.values():
+        for a in self._docs.scan("assessments"):
             if a["status"] == "open":
                 if today > date.fromisoformat(a["demand_notice"]["objection_deadline"]):
                     a["status"] = "final_and_conclusive"
                     a["history"].append({"at": today.isoformat(),
                                          "event": "final_and_conclusive_no_objection"})
+                    self._put_asm(a)
                     events.append({"assessment_id": a["assessment_id"],
                                    "event": "final_and_conclusive"})
             elif a["status"] == "objected" and a["objection_id"]:
-                obj = self._objections[a["objection_id"]]
-                if obj["status"] == "pending" and today > date.fromisoformat(obj["decision_deadline"]):
+                obj = self._docs.get("objections", a["objection_id"])
+                if obj and obj["status"] == "pending" and today > date.fromisoformat(obj["decision_deadline"]):
                     obj["status"] = "deemed_upheld"
                     a["amount_kobo"] = obj["admitted_amount_kobo"]
                     a["status"] = "final_and_conclusive"
@@ -166,12 +183,14 @@ class AssessmentStore:
                         "basis": "objection deemed upheld (90-day decision lapse, NTAA s.41)",
                         "referred_at": today.isoformat(),
                     }
-                    self._tat_referrals.append(referral)
+                    self._docs.put("tat_referrals", referral["referral_id"], referral)
                     a["history"].append({"at": today.isoformat(),
                                          "event": "objection_deemed_upheld",
                                          "tat_referral_id": referral["referral_id"]})
+                    self._put_obj(obj)
+                    self._put_asm(a)
                     events.append(referral)
         return events
 
     def tat_referrals(self) -> list[dict]:
-        return list(self._tat_referrals)
+        return self._docs.scan("tat_referrals")

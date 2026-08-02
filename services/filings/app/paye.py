@@ -17,6 +17,7 @@ import itertools
 from datetime import date
 from decimal import Decimal
 
+from . import store
 from .rules_data import (PAYE_BANDS, PAYE_CRA, PAYE_EXEMPT_DEDUCTION_KEYS,
                          PAYE_MINIMUM_TAX_BPS, resolve)
 from .util import deadline_nth_of_following_month, round_half_up
@@ -127,25 +128,37 @@ def build_form_h1(tin_employer: str, year: int,
 
 
 class PayeReturnStore:
-    """One live PAYE schedule per (employer, period); idempotent by key."""
+    """One live PAYE schedule per (employer, period); idempotent by key.
 
-    def __init__(self):
-        self._live: dict[tuple[str, str], dict] = {}
-        self._by_idem: dict[str, dict] = {}
+    Durable via app.store.DocStore (Postgres in prod, in-memory in dev)."""
+
+    def __init__(self, docs: "store.DocStore | None" = None):
+        self._docs = docs if docs is not None else store.DocStore()
+        store.seed_counter(_ids, store.max_id_suffix(
+            self._docs, "paye_returns", "return_id", "PAYE-"))
+
+    @staticmethod
+    def _key(employer_tin: str, period: str) -> str:
+        return f"{employer_tin}|{period}"
 
     def file(self, sched: dict, idempotency_key: str) -> tuple[dict, bool]:
-        if idempotency_key in self._by_idem:
-            return self._by_idem[idempotency_key], False
-        key = (sched["employer_tin"], sched["period"])
-        if key in self._live:
+        replay = self._docs.get("paye_idem", idempotency_key)
+        if replay is not None:
+            return replay, False
+        key = self._key(sched["employer_tin"], sched["period"])
+        if self._docs.get("paye_returns", key) is not None:
             raise PayeError("PAYE schedule already filed for period")
         rec = dict(sched)
         rec.update({"return_id": f"PAYE-{next(_ids):06d}",
                     "filed_at": date.today().isoformat(), "status": "filed"})
-        self._live[key] = rec
-        self._by_idem[idempotency_key] = rec
+        self._docs.put("paye_returns", key, rec)
+        self._docs.put("paye_idem", idempotency_key, rec)
         return rec, True
 
     def for_year(self, employer_tin: str, year: int) -> list[dict]:
-        return [s for (t, p), s in sorted(self._live.items())
-                if t == employer_tin and p.startswith(f"{year}-")]
+        out = []
+        for rec in self._docs.scan("paye_returns"):
+            if rec.get("employer_tin") == employer_tin and \
+                    str(rec.get("period", "")).startswith(f"{year}-"):
+                out.append(rec)
+        return sorted(out, key=lambda r: r.get("period", ""))
