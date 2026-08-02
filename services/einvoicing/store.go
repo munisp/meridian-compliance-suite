@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 
@@ -120,6 +121,22 @@ func (s *InvoiceStore) GetByIRN(irn string) (*CanonicalInvoice, bool) {
 // Idempotency-Key was already consumed.
 var ErrIdempotentReplay = errors.New("idempotency key already used")
 
+// ErrConflict is returned when Postgres rejects a write on the unique
+// indexes (IRN / supplier+invoice number) enforced by migration
+// 0001_einvoicing_uniqueness — i.e. a duplicate caught DB-side in
+// multi-instance deployments where the in-memory maps are not a constraint.
+var ErrConflict = errors.New("invoice conflicts with an existing record")
+
+// pgUniqueViolation extracts the constraint name from a Postgres 23505
+// unique-violation error.
+func pgUniqueViolation(err error) (constraint string, ok bool) {
+	var pge *pgconn.PgError
+	if errors.As(err, &pge) && pge.Code == "23505" {
+		return pge.ConstraintName, true
+	}
+	return "", false
+}
+
 // Save persists (append+fsync) and indexes the invoice. Returns the prior
 // invoice id if the idempotency key already exists.
 func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
@@ -151,6 +168,14 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 	}
 	if s.docs != nil {
 		if err := s.docs.Put(context.Background(), "invoices", inv.ID, line); err != nil {
+			if constraint, ok := pgUniqueViolation(err); ok {
+				// DB-side uniqueness (multi-instance safe): map to the
+				// same conflict semantics the in-memory maps provide.
+				if constraint == "einvoicing_idem_ux" {
+					return s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey], ErrIdempotentReplay
+				}
+				return "", fmt.Errorf("%w (constraint %s)", ErrConflict, constraint)
+			}
 			return "", fmt.Errorf("pg persist: %w", err)
 		}
 	}
