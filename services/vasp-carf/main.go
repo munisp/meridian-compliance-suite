@@ -39,7 +39,7 @@ type Service struct {
 
 func main() {
 	cfg := Config{
-		Port:        env("PORT", "8110"),
+		Port:        env("PORT", "8116"),
 		AuthMode:    env("AUTH_MODE", "dev"),
 		JWTSecret:   env("MERIDIAN_DEV_JWT_SECRET", "meridian-dev-secret"),
 		RegistryURL: env("RP_REGISTRY_URL", ""),

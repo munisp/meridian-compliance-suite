@@ -6,10 +6,10 @@ const env = (k: string, def: string) =>
   (import.meta as any).env?.[k] || def
 
 export const BASES = {
-  einvoicing: env('VITE_EINVOICING_URL', 'http://localhost:8101'),
-  wht: env('VITE_WHT_URL', 'http://localhost:8107'),
+  einvoicing: env('VITE_EINVOICING_URL', 'http://localhost:8110'),
+  wht: env('VITE_WHT_URL', 'http://localhost:8130'),
   etr: env('VITE_ETR_URL', 'http://localhost:8109'),
-  vasp: env('VITE_VASP_CARF_URL', 'http://localhost:8110'),
+  vasp: env('VITE_VASP_CARF_URL', 'http://localhost:8116'),
   pos: env('VITE_POS_VAT_URL', 'http://localhost:8106'),
   cases: env('VITE_CASE_MGMT_URL', 'http://localhost:8113'),
 } as const
