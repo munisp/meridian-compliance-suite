@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS fx_rates (
   currency TEXT PRIMARY KEY, per_ngn REAL, as_of TEXT);
 CREATE TABLE IF NOT EXISTS reports (
   id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at TEXT);
+CREATE INDEX IF NOT EXISTS ix_tx_from ON transactions(from_tin);
+CREATE INDEX IF NOT EXISTS ix_tx_to ON transactions(to_tin);
+CREATE INDEX IF NOT EXISTS ix_tx_tenant ON transactions(tenant_id);
 """
 
 DEFAULT_FX = {  # dev FX table: units of currency per 1 NGN is 1/per_ngn

@@ -104,8 +104,12 @@ func TestMBSSandboxPreclear(t *testing.T) {
 	if res.Status != "cleared" || res.IRN == "" || res.Stamp == nil {
 		t.Fatalf("bad result %+v", res)
 	}
-	if !strings.HasPrefix(res.IRN, "IRN-1234-20260115-") {
+	// canonical NRS format: <invNum>-<svcID8>-<YYYYMMDD> (nrs_irn.go)
+	if res.IRN != "INV-2026-0001-MBSSIM01-20260115" {
 		t.Fatalf("irn=%s", res.IRN)
+	}
+	if _, _, _, err := ParseIRN(res.IRN); err != nil {
+		t.Fatalf("sandbox IRN must parse: %v", err)
 	}
 	// stamp verifies against MBS public key
 	if !Verify(mbs.PublicKeyHex(), res.Stamp.Payload, res.Stamp.Signature) {

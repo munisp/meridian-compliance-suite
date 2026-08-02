@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
+	"github.com/munisp/meridian-compliance-suite/packages/pgmigrate"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/devjwt"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/envelope"
@@ -94,6 +96,34 @@ func tenantGuard(w http.ResponseWriter, r *http.Request, inv *CanonicalInvoice) 
 	return false
 }
 
+// migrationsDir locates the numbered SQL migrations (infra/postgres/
+// migrations in the repo; /migrations in the container image).
+func migrationsDir() string {
+	if d := os.Getenv("MIGRATIONS_DIR"); d != "" {
+		return d
+	}
+	for _, d := range []string{"infra/postgres/migrations", "../infra/postgres/migrations", "../../infra/postgres/migrations"} {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			return d
+		}
+	}
+	return "infra/postgres/migrations"
+}
+
+// writeStoreConflict maps store save errors to the existing conflict
+// responses: idempotent replay / 409 problem for DB-enforced duplicates
+// (Postgres 23505 via ErrIdempotentReplay / ErrConflict), else 500.
+func writeStoreConflict(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrIdempotentReplay):
+		devjwt.Problem(w, 409, "conflict", "idempotency key already used")
+	case errors.Is(err, ErrConflict):
+		devjwt.Problem(w, 409, "conflict", err.Error())
+	default:
+		devjwt.Problem(w, 500, "persist failed", err.Error())
+	}
+}
+
 func main() {
 	// M-4: prod refuses to boot on the silent QR dev-key default.
 	if err := validateQRKey(); err != nil {
@@ -114,6 +144,11 @@ func main() {
 			log.Printf("postgres docstore: %v (staying on dev store)", err)
 		} else if err := store.SetPG(ctx, docs); err != nil {
 			log.Printf("postgres load: %v (staying on dev store)", err)
+		} else if err := pgmigrate.Apply(ctx, pool, migrationsDir()); err != nil {
+			// Uniqueness indexes (IRN/idempotency/supplier+number) come from
+			// the numbered migrations; without them multi-instance
+			// duplicates are only caught by the in-memory maps.
+			log.Printf("migrations: %v (DB uniqueness may be unenforced)", err)
 		}
 	}
 	outbox, err := envelope.NewOutbox(filepath.Join(dir, "outbox.jsonl"))
@@ -248,7 +283,7 @@ func (s *Server) handleCreateInvoice(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			devjwt.Problem(w, 500, "persist failed", err.Error())
+			writeStoreConflict(w, err)
 			return
 		}
 		env, err := newInvoiceEvent("nrs.mbs.invoice.received.v1", inv)

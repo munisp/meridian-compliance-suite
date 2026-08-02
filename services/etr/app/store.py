@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS entities(
     id TEXT PRIMARY KEY, group_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS computations(
     id TEXT PRIMARY KEY, group_id TEXT NOT NULL, fiscal_year INT, data TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_etr_entities_group ON entities(group_id);
+CREATE INDEX IF NOT EXISTS ix_etr_comp_group ON computations(group_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_etr_comp_group_year ON computations(group_id, fiscal_year);
 """
 
 # Same logical schema; `seq` gives the computations ordering that SQLite
@@ -39,6 +42,9 @@ CREATE TABLE IF NOT EXISTS entities(
 CREATE TABLE IF NOT EXISTS computations(
     id TEXT PRIMARY KEY, group_id TEXT NOT NULL, fiscal_year INT, data TEXT NOT NULL,
     seq BIGSERIAL);
+CREATE INDEX IF NOT EXISTS ix_etr_entities_group ON entities(group_id);
+CREATE INDEX IF NOT EXISTS ix_etr_comp_group ON computations(group_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_etr_comp_group_year ON computations(group_id, fiscal_year);
 """
 
 
@@ -160,6 +166,12 @@ class Store:
     # ---- computations ----
     def put_computation(self, c: Computation) -> None:
         with self._lock:
+            # one live computation per (group_id, fiscal_year) — enforced by
+            # ux_etr_comp_group_year; a recomputation supersedes the prior
+            # record (last write wins, same as the doc-store convention)
+            self._b.execute(
+                "DELETE FROM computations WHERE group_id=%s AND fiscal_year=%s AND id<>%s",
+                (c.group_id, c.fiscal_year, c.id))
             self._b.execute(_UPSERT_COMP, (c.id, c.group_id, c.fiscal_year, c.model_dump_json()))
 
     def get_computation(self, cid: str) -> Computation | None:

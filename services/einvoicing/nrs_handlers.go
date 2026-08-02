@@ -103,7 +103,7 @@ func (s *Server) handleNRSCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, nrsResponse(s, prior, nil, true))
 		return
 	} else if err != nil {
-		devjwt.Problem(w, 500, "persist failed", err.Error())
+		writeStoreConflict(w, err)
 		return
 	}
 	run, err := s.runner.Run(r.Context(), s, "wf-nrs-einvoice", inv.ID)

@@ -60,6 +60,10 @@ func NewSandboxMBS() *SandboxMBS {
 
 func (m *SandboxMBS) Name() string { return "mbs-sandbox" }
 
+// sandboxServiceID is the simulator's stand-in NRS integrator id (8
+// alphanumeric chars) used when the invoice carries no valid ServiceID.
+const sandboxServiceID = "MBSSIM01"
+
 // PublicKeyHex lets verifiers check stamps out-of-band.
 func (m *SandboxMBS) PublicKeyHex() string { return hex.EncodeToString(m.pub) }
 
@@ -72,13 +76,19 @@ func (m *SandboxMBS) Preclear(ctx context.Context, inv *CanonicalInvoice, ublXML
 	if inv.CSIDSignature == "" {
 		return &ClearanceResult{Status: "rejected", Reason: "invoice not CSID-signed"}, nil
 	}
-	n := m.seq.Add(1)
-	tin := inv.Supplier.TIN
-	if len(tin) > 4 {
-		tin = tin[:4]
+	// Canonical IRN format (audit fix): the sandbox must mint the same
+	// <invNum>-<svcID8>-<YYYYMMDD> shape as the official builder
+	// (nrs_irn.go) so sim-flow IRNs never leak a divergent format into
+	// stored invoices or QR payloads.
+	svcID := inv.ServiceID
+	if !ValidServiceID(svcID) {
+		svcID = sandboxServiceID
 	}
-	day := strings.ReplaceAll(inv.IssueDate, "-", "")
-	irn := fmt.Sprintf("IRN-%s-%s-%08d", tin, day, n)
+	irn, err := BuildIRN(inv.InvoiceNumber, svcID, inv.IssueDate)
+	if err != nil {
+		return &ClearanceResult{Status: "rejected", Reason: "IRN build: " + err.Error()}, nil
+	}
+	m.seq.Add(1)
 	ts := time.Now().UTC().Format(time.RFC3339)
 	payload := m.stampPayload(irn, inv.Hash(), ts)
 	sig := ed25519.Sign(m.priv, []byte(payload))

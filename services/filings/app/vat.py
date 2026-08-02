@@ -21,6 +21,7 @@ from __future__ import annotations
 import itertools
 from datetime import date
 
+from . import store
 from .rules_data import VAT_RATE_BPS, resolve
 from .util import deadline_nth_of_following_month, parse_period
 
@@ -130,19 +131,27 @@ class VatReturnStore:
     """Filing store: one live return per (tin, period); amendments supersede
     and are idempotent per amendment idempotency key.
 
-    REAL: in-memory backend (same convention as insights); swap for DB.
+    REAL: durable via app.store.DocStore — Postgres when DATABASE_URL /
+    FILINGS_DATABASE_URL is set (prod), in-memory fallback in dev.
     """
 
-    def __init__(self):
-        self._live: dict[tuple[str, str], dict] = {}
-        self._by_idem: dict[str, dict] = {}
+    def __init__(self, docs: "store.DocStore | None" = None):
+        self._docs = docs if docs is not None else store.DocStore()
+        # re-seed the ID counter so restart on a durable backend cannot
+        # re-issue an existing return_id
+        store.seed_counter(_ids, store.max_id_suffix(
+            self._docs, "vat_returns", "return_id", "VAT002-"))
+
+    @staticmethod
+    def _key(tin: str, period: str) -> str:
+        return f"{tin}|{period}"
 
     def file(self, ret: dict, idempotency_key: str,
              amendment_of: str | None = None) -> tuple[dict, bool]:
-        if idempotency_key in self._by_idem:
-            return self._by_idem[idempotency_key], False  # replay
-        key = (ret["tin"], ret["period"])
-        prior = self._live.get(key)
+        replay = self._docs.get("vat_idem", idempotency_key)
+        if replay is not None:
+            return replay, False  # replay
+        prior = self._docs.get("vat_returns", self._key(ret["tin"], ret["period"]))
         version = 1 if prior is None else prior["version"] + 1
         if prior is not None and amendment_of is None:
             raise VatError("return already filed for period; submit as amendment")
@@ -154,9 +163,9 @@ class VatReturnStore:
             "amends": prior["return_id"] if prior else None,
             "filed_at": date.today().isoformat(),
         })
-        self._live[key] = rec
-        self._by_idem[idempotency_key] = rec
+        self._docs.put("vat_returns", self._key(ret["tin"], ret["period"]), rec)
+        self._docs.put("vat_idem", idempotency_key, rec)
         return rec, True
 
     def get(self, tin: str, period: str) -> dict | None:
-        return self._live.get((tin, period))
+        return self._docs.get("vat_returns", self._key(tin, period))
