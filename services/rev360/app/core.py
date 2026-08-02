@@ -172,6 +172,10 @@ CREATE TABLE IF NOT EXISTS cases (
 CREATE TABLE IF NOT EXISTS etl_staging (record_id TEXT PRIMARY KEY, payload TEXT, batch_id TEXT);
 CREATE TABLE IF NOT EXISTS etl_clean (record_id TEXT PRIMARY KEY, payload TEXT, batch_id TEXT);
 CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, kind TEXT, summary TEXT, created_at TEXT);
+CREATE INDEX IF NOT EXISTS ix_legacy_tin ON legacy_records(tin);
+CREATE INDEX IF NOT EXISTS ix_legacy_batch ON legacy_records(batch_id);
+CREATE INDEX IF NOT EXISTS ix_defects_status ON defects(status);
+CREATE INDEX IF NOT EXISTS ix_cases_status ON cases(status);
 """
 
 
