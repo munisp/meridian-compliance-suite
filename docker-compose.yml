@@ -47,8 +47,23 @@ services:
       - .:/app
       - tpcbcr-data:/data
 
+  str-filing:
+    image: python:3.12-slim
+    working_dir: /app/services/str-filing
+    command: sh -c "pip install -e /app/packages/py && pip install -r requirements.txt uvicorn && uvicorn app.main:app --host 0.0.0.0 --port 8150"
+    environment:
+      AUTH_MODE: dev
+      DATA_DIR: /data
+      STR_NFIU_ADAPTER: sim   # dev stack only; prod uses the HTTP adapter (NFIU_BASE_URL)
+      STR_WORKER_ENABLED: "true"
+    ports: ["8150:8150"]
+    volumes:
+      - .:/app
+      - strfiling-data:/data
+
 volumes:
   einvoicing-data:
   rev360-data:
   wht-data:
   tpcbcr-data:
+  strfiling-data:
