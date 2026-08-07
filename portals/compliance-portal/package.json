@@ -1,5 +1,6 @@
 {
   "name": "meridian-compliance-portal",
+  "description": "Meridian Compliance Portal",
   "private": true,
   "version": "1.0.0",
   "type": "module",
