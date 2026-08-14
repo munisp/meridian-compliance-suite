@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -79,17 +83,61 @@ type CARFRecord struct {
 	Validation     []string `json:"validation"`
 }
 
+// CARFStore mirrors the durable DocStore pattern used by sibling services
+// (pos-vat, notification, rp-registry): in-memory hot index + embedded durable
+// append-log (fsync per commit, replay on boot, last-write-wins per record ID).
+// Honesty tag: same as pos-vat — the durable fallback is an embedded append-log
+// store with the same durability contract; swap for SQLite/Postgres via the
+// same interface in prod.
 type CARFStore struct {
 	mu      sync.Mutex
 	records map[string]*CARFRecord
+	dir     string
+	logFile *os.File
 }
 
-func NewCARFStore() *CARFStore { return &CARFStore{records: map[string]*CARFRecord{}} }
+func NewCARFStore(dir string) *CARFStore {
+	cs := &CARFStore{records: map[string]*CARFRecord{}, dir: dir}
+	os.MkdirAll(dir, 0o755)
+	cs.replay()
+	f, err := os.OpenFile(filepath.Join(dir, "carf_records.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err == nil {
+		cs.logFile = f
+	}
+	return cs
+}
 
-func (cs *CARFStore) Add(r *CARFRecord) {
+func (cs *CARFStore) replay() {
+	f, err := os.Open(filepath.Join(cs.dir, "carf_records.log"))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 4<<20), 4<<20)
+	for sc.Scan() {
+		var r CARFRecord
+		if json.Unmarshal(sc.Bytes(), &r) == nil && r.ID != "" {
+			rc := r
+			cs.records[r.ID] = &rc
+		}
+	}
+}
+
+// Add persists (append+fsync) then indexes the record. Re-adding an existing
+// ID records a new log entry; replay applies last-write-wins.
+func (cs *CARFStore) Add(r *CARFRecord) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	if cs.logFile != nil {
+		b, _ := json.Marshal(r)
+		if _, err := cs.logFile.Write(append(b, '\n')); err != nil {
+			return err
+		}
+		cs.logFile.Sync()
+	}
 	cs.records[r.ID] = r
+	return nil
 }
 
 func (cs *CARFStore) Get(id string) (*CARFRecord, bool) {

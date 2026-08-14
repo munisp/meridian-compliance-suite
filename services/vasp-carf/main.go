@@ -51,7 +51,7 @@ func main() {
 	}
 	svc := &Service{
 		cfg: cfg, engine: NewEngine(cfg.DataDir), packs: NewPackSet(cfg.RegistryURL),
-		gates: NewGateChecker(cfg.RegWatchURL, cfg.DataDir), carf: NewCARFStore(),
+		gates: NewGateChecker(cfg.RegWatchURL, cfg.DataDir), carf: NewCARFStore(cfg.DataDir),
 	}
 	// SPEC §1.3: AUTH_MODE=keycloak selects RS256/JWKS verification.
 	// FAIL CLOSED: a keycloak deployment missing OIDC config refuses to boot
@@ -305,7 +305,10 @@ func (s *Service) handleCARFBuild(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 500, "build failed", err.Error())
 		return
 	}
-	s.carf.Add(rec)
+	if err := s.carf.Add(rec); err != nil {
+		writeProblem(w, 500, "persist failed", err.Error())
+		return
+	}
 	writeJSON(w, 201, rec)
 }
 
@@ -354,7 +357,14 @@ func (s *Service) handleCARFCorrect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orig.Status = "superseded"
-	s.carf.Add(rec)
+	if err := s.carf.Add(orig); err != nil { // persist status transition
+		writeProblem(w, 500, "persist failed", err.Error())
+		return
+	}
+	if err := s.carf.Add(rec); err != nil {
+		writeProblem(w, 500, "persist failed", err.Error())
+		return
+	}
 	writeJSON(w, 201, rec)
 }
 
@@ -376,6 +386,7 @@ func (s *Service) handleCARFTransmit(w http.ResponseWriter, r *http.Request) {
 	gates := s.gates.Gates()
 	if !s.gates.Open("carf.transmit_enabled") || !s.gates.Open("carf.gate.changed") {
 		rec.Status = "refused"
+		s.carf.Add(rec) // persist status transition (best-effort; refusal still returned)
 		writeProblem(w, 423, "transmission refused: gate closed",
 			"carf.transmit_enabled="+boolStr(gates["carf.transmit_enabled"].Open)+
 				" carf.gate.changed="+boolStr(gates["carf.gate.changed"].Open)+
@@ -387,6 +398,10 @@ func (s *Service) handleCARFTransmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec.Status = "transmitted"
+	if err := s.carf.Add(rec); err != nil { // persist status transition
+		writeProblem(w, 500, "persist failed", err.Error())
+		return
+	}
 	writeJSON(w, 200, map[string]any{"status": "transmitted", "message_ref_id": rec.MessageRefId,
 		"note": "dev simulator: envelope logged, no real OECD channel", "gates": gates})
 }
