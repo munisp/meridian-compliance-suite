@@ -115,6 +115,8 @@ func migrationsDir() string {
 // (Postgres 23505 via ErrIdempotentReplay / ErrConflict), else 500.
 func writeStoreConflict(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrIdempotencyPayloadConflict):
+		devjwt.Problem(w, 409, "conflict", ErrIdempotencyPayloadConflict.Error())
 	case errors.Is(err, ErrIdempotentReplay):
 		devjwt.Problem(w, 409, "conflict", "idempotency key already used")
 	case errors.Is(err, ErrConflict):
@@ -276,6 +278,12 @@ func (s *Server) handleCreateInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 		priorID, err := s.store.Save(inv)
 		if priorID != "" {
+			if err != nil && !errors.Is(err, ErrIdempotentReplay) {
+				// payload-binding conflict (same key, different payload) is
+				// a 409, never a silent 200 replay of the prior invoice.
+				writeStoreConflict(w, err)
+				return
+			}
 			prior, _ := s.store.Get(priorID)
 			writeJSON(w, 200, map[string]any{
 				"idempotent_replay": true, "invoice": prior,

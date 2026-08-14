@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -99,6 +100,11 @@ func (s *Server) handleNRSCreate(w http.ResponseWriter, r *http.Request) {
 		inv.PaymentStatus = "PENDING"
 	}
 	if priorID, err := s.store.Save(inv); priorID != "" {
+		if err != nil && !errors.Is(err, ErrIdempotentReplay) {
+			// same key + different payload -> 409, not a silent replay
+			writeStoreConflict(w, err)
+			return
+		}
 		prior, _ := s.store.Get(priorID)
 		writeJSON(w, 200, nrsResponse(s, prior, nil, true))
 		return

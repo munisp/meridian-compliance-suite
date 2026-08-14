@@ -121,6 +121,13 @@ func (s *InvoiceStore) GetByIRN(irn string) (*CanonicalInvoice, bool) {
 // Idempotency-Key was already consumed.
 var ErrIdempotentReplay = errors.New("idempotency key already used")
 
+// ErrIdempotencyPayloadConflict is returned when an Idempotency-Key is
+// replayed with a DIFFERENT invoice payload (audit w2 #5: previously the
+// prior invoice was returned regardless of payload). Payload binding uses
+// CanonicalInvoice.CoreHash — the same locked-core-field hash that enforces
+// post-signage immutability. HTTP layer maps this to 409.
+var ErrIdempotencyPayloadConflict = errors.New("idempotency key already used with a different payload")
+
 // ErrConflict is returned when Postgres rejects a write on the unique
 // indexes (IRN / supplier+invoice number) enforced by migration
 // 0001_einvoicing_uniqueness — i.e. a duplicate caught DB-side in
@@ -144,6 +151,11 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 	defer s.mu.Unlock()
 	if inv.IdempotencyKey != "" {
 		if id, dup := s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey]; dup && id != inv.ID {
+			// Payload binding: same key + different core payload -> 409-class
+			// conflict, never a silent replay of the prior invoice.
+			if prior, ok := s.byID[id]; ok && prior.CoreHash() != inv.CoreHash() {
+				return id, ErrIdempotencyPayloadConflict
+			}
 			return id, ErrIdempotentReplay
 		}
 	}
@@ -172,7 +184,11 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 				// DB-side uniqueness (multi-instance safe): map to the
 				// same conflict semantics the in-memory maps provide.
 				if constraint == "einvoicing_idem_ux" {
-					return s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey], ErrIdempotentReplay
+					priorID := s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey]
+					if prior, ok := s.byID[priorID]; ok && prior.CoreHash() != inv.CoreHash() {
+						return priorID, ErrIdempotencyPayloadConflict
+					}
+					return priorID, ErrIdempotentReplay
 				}
 				return "", fmt.Errorf("%w (constraint %s)", ErrConflict, constraint)
 			}
