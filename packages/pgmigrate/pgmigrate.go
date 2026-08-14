@@ -33,6 +33,12 @@ func ParseVersion(filename string) (version int, name string, ok bool) {
 	if !strings.HasSuffix(base, ".sql") {
 		return 0, "", false
 	}
+	// Companion rollback files (NNNN_name.rollback.sql) are NOT migrations;
+	// they are applied manually by operators and must not trip the
+	// duplicate-version check for the forward migration they accompany.
+	if strings.HasSuffix(base, ".rollback.sql") {
+		return 0, "", false
+	}
 	stem := strings.TrimSuffix(base, ".sql")
 	sep := strings.Index(stem, "_")
 	if sep <= 0 {
