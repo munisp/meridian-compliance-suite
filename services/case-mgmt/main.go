@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/munisp/meridian-compliance-suite/packages/authx"
+		"github.com/munisp/meridian-compliance-suite/packages/httpx"
+"github.com/munisp/meridian-compliance-suite/packages/authx"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 
@@ -138,10 +139,11 @@ func main() {
 	mux.HandleFunc("GET /v1/workflows", svc.auth(svc.handleWorkflowList))
 	mux.HandleFunc("POST /v1/workflows/{name}/run", svc.auth(svc.handleWorkflowRun))
 
-	srv := &http.Server{Addr: ":" + cfg.Port, Handler: svc.recover(svc.logging(mux)), ReadHeaderTimeout: 5 * time.Second}
+	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
+	srv := httpx.NewServer(":"+cfg.Port, svc.recover(svc.logging(mux)))
 	log.Printf("case-mgmt listening on :%s (auth=%s worm=%s notify=%s)",
 		cfg.Port, cfg.AuthMode, orDef(cfg.WORMURL, "local"), orDef(cfg.NotifyURL, "log"))
-	log.Fatal(srv.ListenAndServe())
+	log.Fatal(httpx.Serve(srv))
 }
 
 func orDef(s, d string) string {

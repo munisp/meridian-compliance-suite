@@ -15,9 +15,10 @@
 //
 //	http.ListenAndServe(addr, authx.Middleware(mux))
 //
-// Startup never fails because a prod var is missing: when AUTH_MODE=keycloak
-// but KEYCLOAK_ISSUER is unset the middleware falls back to dev behaviour and
-// logs profile=dev component=auth.
+// Startup fails closed on misconfiguration: AUTH_MODE=keycloak without
+// KEYCLOAK_ISSUER, PROFILE=prod without keycloak, or dev mode without an
+// explicit MERIDIAN_DEV_JWT_SECRET are startup errors — never a silent
+// downgrade to dev auth.
 package authx
 
 import (
@@ -70,12 +71,11 @@ func Problem(w http.ResponseWriter, status int, title, detail string) {
 	})
 }
 
-// DevSecret returns the dev HMAC secret or the documented default.
+// DevSecret returns the dev HMAC secret from MERIDIAN_DEV_JWT_SECRET. There is
+// no default: an empty return means the secret is not configured and dev auth
+// must not be used (fail-closed, HARDENING.md H2).
 func DevSecret() string {
-	if s := os.Getenv("MERIDIAN_DEV_JWT_SECRET"); s != "" {
-		return s
-	}
-	return "meridian-dev-secret-change-me-32!"
+	return os.Getenv("MERIDIAN_DEV_JWT_SECRET")
 }
 
 func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -337,20 +337,45 @@ func (v *KeycloakVerifier) Verify(token string) (Claims, error) {
 
 // ---------------- env-selected middleware ----------------
 
-// Middleware enforces Bearer JWT per AUTH_MODE (H1/H2): keycloak mode uses
-// RS256/JWKS; dev mode (default) accepts HS256 dev tokens and X-Dev-Role.
-// /healthz and /readyz are always public.
-func Middleware(next http.Handler) http.Handler {
-	mode := os.Getenv("AUTH_MODE")
-	var kc *KeycloakVerifier
+// middlewareConfigFromEnv resolves the auth mode from the environment,
+// failing closed:
+//
+//   - AUTH_MODE=keycloak without KEYCLOAK_ISSUER is a startup error (never a
+//     silent downgrade to dev auth, which would accept X-Dev-Role).
+//   - PROFILE=prod refuses dev mode entirely.
+//   - dev mode requires MERIDIAN_DEV_JWT_SECRET to be set explicitly.
+func middlewareConfigFromEnv() (mode string, kc *KeycloakVerifier, err error) {
+	mode = os.Getenv("AUTH_MODE")
+	if mode == "" {
+		mode = "dev"
+	}
 	if mode == "keycloak" {
 		kc = KeycloakVerifierFromEnv()
 		if kc == nil {
-			log.Printf("profile=dev component=auth (AUTH_MODE=keycloak but KEYCLOAK_ISSUER unset)")
-			mode = "dev"
-		} else {
-			log.Printf("profile=prod component=auth (keycloak issuer=%s)", kc.Issuer)
+			return "", nil, errors.New("AUTH_MODE=keycloak requires KEYCLOAK_ISSUER; refusing to start (fail-closed, no dev-auth downgrade)")
 		}
+		return mode, kc, nil
+	}
+	if os.Getenv("PROFILE") == "prod" {
+		return "", nil, fmt.Errorf("PROFILE=prod refuses AUTH_MODE=%q; configure keycloak auth", mode)
+	}
+	if DevSecret() == "" {
+		return "", nil, fmt.Errorf("AUTH_MODE=%s requires MERIDIAN_DEV_JWT_SECRET to be set explicitly; no insecure default", mode)
+	}
+	return mode, nil, nil
+}
+
+// Middleware enforces Bearer JWT per AUTH_MODE (H1/H2): keycloak mode uses
+// RS256/JWKS; dev mode (default) accepts HS256 dev tokens and X-Dev-Role.
+// /healthz and /readyz are always public. Misconfiguration is a startup
+// failure (panic) — auth never fails open.
+func Middleware(next http.Handler) http.Handler {
+	mode, kc, err := middlewareConfigFromEnv()
+	if err != nil {
+		panic(fmt.Sprintf("authx: %v", err))
+	}
+	if mode == "keycloak" {
+		log.Printf("profile=prod component=auth (keycloak issuer=%s)", kc.Issuer)
 	} else {
 		log.Printf("profile=dev component=auth")
 	}

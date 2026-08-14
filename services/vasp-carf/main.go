@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/munisp/meridian-compliance-suite/packages/authx"
+		"github.com/munisp/meridian-compliance-suite/packages/httpx"
+"github.com/munisp/meridian-compliance-suite/packages/authx"
 )
 
 type Config struct {
@@ -96,10 +96,11 @@ func main() {
 	mux.HandleFunc("POST /v1/duties/evaluate", svc.auth(svc.handleDuties))
 	mux.HandleFunc("GET /v1/packs", svc.auth(svc.handlePacks))
 
-	srv := &http.Server{Addr: ":" + cfg.Port, Handler: svc.recover(svc.logging(mux)), ReadHeaderTimeout: 5 * time.Second}
+	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
+	srv := httpx.NewServer(":"+cfg.Port, svc.recover(svc.logging(mux)))
 	log.Printf("vasp-carf listening on :%s (auth=%s registry=%s regwatch=%s)",
 		cfg.Port, cfg.AuthMode, orDef(cfg.RegistryURL, "embedded"), orDef(cfg.RegWatchURL, "local-gate-file"))
-	log.Fatal(srv.ListenAndServe())
+	log.Fatal(httpx.Serve(srv))
 }
 
 func orDef(s, d string) string {

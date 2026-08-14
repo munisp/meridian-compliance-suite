@@ -134,6 +134,7 @@ func TestDevRoundTrip(t *testing.T) {
 
 func TestMiddlewareDev(t *testing.T) {
 	t.Setenv("AUTH_MODE", "dev")
+	t.Setenv("MERIDIAN_DEV_JWT_SECRET", "test-dev-secret-explicit")
 	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, ok := FromContext(r)
 		if !ok && r.URL.Path != "/healthz" {
@@ -160,5 +161,75 @@ func TestMiddlewareDev(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/x", nil))
 	if rec.Code != 401 {
 		t.Fatalf("want 401, got %d", rec.Code)
+	}
+}
+
+// mustPanic runs fn and fails unless it panics (startup fail-closed).
+func mustPanic(t *testing.T, name string, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("%s: want startup panic (fail-closed), got none", name)
+		}
+	}()
+	fn()
+}
+
+// Regression (W3 HIGH): AUTH_MODE=keycloak with KEYCLOAK_ISSUER unset must be
+// a boot error — never a silent downgrade to dev auth accepting X-Dev-Role.
+func TestMiddlewareKeycloakMissingIssuerFailsClosed(t *testing.T) {
+	t.Setenv("AUTH_MODE", "keycloak")
+	t.Setenv("KEYCLOAK_ISSUER", "")
+	t.Setenv("KEYCLOAK_JWKS_URL", "")
+	mustPanic(t, "keycloak without issuer", func() {
+		Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	})
+}
+
+// Regression: PROFILE=prod refuses dev auth mode entirely.
+func TestMiddlewareDevModeRefusedInProd(t *testing.T) {
+	t.Setenv("PROFILE", "prod")
+	t.Setenv("AUTH_MODE", "dev")
+	t.Setenv("MERIDIAN_DEV_JWT_SECRET", "test-dev-secret-explicit")
+	mustPanic(t, "dev mode in prod profile", func() {
+		Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	})
+}
+
+// Regression (W3 MEDIUM): no well-known default dev secret — dev mode without
+// an explicit MERIDIAN_DEV_JWT_SECRET is a boot error.
+func TestMiddlewareDevRequiresExplicitSecret(t *testing.T) {
+	t.Setenv("AUTH_MODE", "dev")
+	t.Setenv("MERIDIAN_DEV_JWT_SECRET", "")
+	if DevSecret() != "" {
+		t.Fatal("DevSecret must not return a well-known default")
+	}
+	mustPanic(t, "dev mode without secret", func() {
+		Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	})
+}
+
+// Keycloak mode rejects X-Dev-Role header auth even when properly configured.
+func TestMiddlewareKeycloakRejectsDevRoleHeader(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kid := "test-key-fc"
+	srv := jwksServer(t, &key.PublicKey, kid)
+	defer srv.Close()
+	t.Setenv("PROFILE", "prod")
+	t.Setenv("AUTH_MODE", "keycloak")
+	t.Setenv("KEYCLOAK_ISSUER", srv.URL)
+	t.Setenv("KEYCLOAK_JWKS_URL", srv.URL)
+	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "ok")
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/v1/x", nil)
+	req.Header.Set("X-Dev-Role", "admin")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("X-Dev-Role must be rejected in keycloak mode, got %d", rec.Code)
 	}
 }
