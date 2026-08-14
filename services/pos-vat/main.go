@@ -9,8 +9,9 @@ package main
 import (
 	"log"
 	"net/http"
+
+	"github.com/munisp/meridian-compliance-suite/packages/httpx"
 	"os"
-	"time"
 )
 
 type Config struct {
@@ -77,15 +78,12 @@ func main() {
 	mux.HandleFunc("POST /v1/workflows/{name}/run", svc.auth(svc.handleWorkflowRun))
 	mux.HandleFunc("GET /v1/workflows", svc.auth(svc.handleWorkflowList))
 
-	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           svc.recoverMiddleware(svc.logging(mux)),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
+	srv := httpx.NewServer(":"+cfg.Port, svc.recoverMiddleware(svc.logging(mux)))
 	log.Printf("pos-vat listening on :%s (auth=%s bus=%s ledger=%s geo=%s registry=%s redis=%s)",
 		cfg.Port, cfg.AuthMode, cfg.EventBus, orElse(cfg.LedgerURL, "dev-inmem"), orElse(cfg.GeoURL, "embedded"),
 		orElse(cfg.RegistryURL, "embedded"), orElse(cfg.RedisURL, "in-mem"))
-	log.Fatal(srv.ListenAndServe())
+	log.Fatal(httpx.Serve(srv))
 }
 
 func orElse(s, def string) string {

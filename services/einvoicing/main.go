@@ -17,7 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
+		"github.com/munisp/meridian-compliance-suite/packages/httpx"
+"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
 	"github.com/munisp/meridian-compliance-suite/packages/pgmigrate"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/devjwt"
@@ -232,7 +233,8 @@ func main() {
 		port = "8110"
 	}
 	log.Printf("%s %s listening on :%s (data dir %s)", serviceName, serviceVersion, port, dir)
-	log.Fatal(http.ListenAndServe(":"+port, devjwt.Middleware(mux)))
+	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
+	log.Fatal(httpx.ListenAndServe(":"+port, devjwt.Middleware(mux)))
 }
 
 // handleCreateInvoice ingests via REST/CSV/SAP-OData adapters with
