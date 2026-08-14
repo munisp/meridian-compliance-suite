@@ -1,10 +1,11 @@
-fastapi
-uvicorn
-pydantic
-httpx
-pytest
-sqlalchemy>=2.0
-psycopg[binary]>=3.1
-prometheus-client
-kafka-python>=2.0
-pyjwt
+# str-filing runtime deps — pinned for reproducible installs (assurance-r3).
+fastapi==0.141.1
+uvicorn==0.52.3
+pydantic==2.13.4
+httpx==0.28.1
+pytest==9.1.1
+sqlalchemy==2.0.52
+psycopg[binary]==3.3.4
+prometheus-client==0.26.0
+kafka-python==3.0.10
+pyjwt==2.13.0

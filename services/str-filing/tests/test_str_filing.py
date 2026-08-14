@@ -235,3 +235,33 @@ def test_12_sim_outage_endpoint_refused_on_http_adapter():
     assert resp.json()["sim"] is True
     _sim().available = True
     assert isinstance(_sim(), SimNFIUClient)
+
+
+def test_13_idempotency_payload_binding_conflict():
+    """w2 #6: same idempotency key + different payload -> 409, not a silent
+    replay of the original filing; identical payload still replays 200."""
+    key = "payload-bind-1"
+    base = {
+        "tenant_id": TENANT, "idempotency_key": key,
+        "subject_ref": "cust-pb", "report_type": "STR",
+        "payload": {"amount": 1000, "currency": "NGN", "trigger": "pb"},
+        "actor": "kyc-engine"}
+    r1 = client.post("/v1/str", json=base)
+    assert r1.status_code == 201, r1.text
+
+    # identical payload replays the original record (200, same id)
+    r2 = client.post("/v1/str", json=dict(base))
+    assert r2.status_code == 200 and r2.json()["id"] == r1.json()["id"]
+
+    # different payload, same key -> 409 conflict
+    changed = dict(base, payload={"amount": 2000, "currency": "NGN",
+                                  "trigger": "pb"})
+    r3 = client.post("/v1/str", json=changed)
+    assert r3.status_code == 409, r3.text
+
+    # direct intake path (Kafka contract) raises the conflict error
+    from app.main import IdempotencyPayloadConflict
+    with pytest.raises(IdempotencyPayloadConflict):
+        intake_event(changed, actor="kafka:test")
+    rec, created = intake_event(dict(base), actor="kafka:test")
+    assert created is False and rec["id"] == r1.json()["id"]
