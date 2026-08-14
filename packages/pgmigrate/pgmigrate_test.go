@@ -19,6 +19,7 @@ func TestParseVersion(t *testing.T) {
 		{"no_version.sql", 0, "", false},
 		{"0000_zero.sql", 0, "", false},
 		{"0001_trailing", 0, "", false},
+		{"0001_einvoicing_uniqueness.rollback.sql", 0, "", false},
 	}
 	for _, c := range cases {
 		v, n, ok := ParseVersion(c.file)
@@ -31,7 +32,7 @@ func TestParseVersion(t *testing.T) {
 
 func TestLoadOrdersAndIgnoresNonMigrations(t *testing.T) {
 	dir := t.TempDir()
-	for _, f := range []string{"0003_c.sql", "0001_a.sql", "0002_b.sql", "README.md"} {
+	for _, f := range []string{"0003_c.sql", "0001_a.sql", "0002_b.sql", "0001_a.rollback.sql", "README.md"} {
 		if err := os.WriteFile(filepath.Join(dir, f), []byte("SELECT 1;"), 0o644); err != nil {
 			t.Fatal(err)
 		}
