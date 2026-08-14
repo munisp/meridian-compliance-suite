@@ -65,6 +65,17 @@ permify = authz.permify_from_env()
 worker = FilingWorker(sessions, adapter, audit, metrics)
 
 
+class IdempotencyPayloadConflict(ValueError):
+    """w2 #6: same (tenant_id, idempotency_key) replayed with a DIFFERENT
+    payload. Subclasses ValueError so the Kafka consumer treats it as a
+    poison message (commit past); the REST handler below maps it to 409."""
+
+
+@app.exception_handler(IdempotencyPayloadConflict)
+async def idem_conflict_exc(request: Request, exc: IdempotencyPayloadConflict):
+    return authz.problem(409, "conflict", str(exc))
+
+
 @app.exception_handler(ValueError)
 async def value_exc(request: Request, exc: ValueError):
     return authz.problem(422, "unprocessable", str(exc))
@@ -111,6 +122,12 @@ def intake_event(event: dict, *, actor: str) -> tuple[dict, bool]:
                                idempotency_key=body.idempotency_key)
                     .one_or_none())
         if existing is not None:
+            # w2 #6: payload binding — the stored payload_hash is compared,
+            # not just the key. Same key + different payload -> 409, never a
+            # silent replay of the original filing.
+            if existing.payload_hash and existing.payload_hash != payload_hash:
+                raise IdempotencyPayloadConflict(
+                    "idempotency key already used with a different payload")
             return existing.to_dict(), False
         rec = db.STRFiling(
             tenant_id=body.tenant_id,
