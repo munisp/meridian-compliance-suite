@@ -27,6 +27,19 @@ type InvoiceStore struct {
 	byIRN     map[string]string // IRN -> invoice id (NRS parity)
 	order     []string
 	docs      *prodx.DocStore // non-nil when DATABASE_URL set (prod)
+
+	// faultHook, when non-nil (tests only), is consulted before each Save;
+	// a non-nil return simulates a database fault (timeout / deadlock) and
+	// the write is refused WITHOUT mutating state (assurance R7 §6.3
+	// db-fault-injection cells).
+	faultHook func(op string) error
+}
+
+// setFaultHook installs a test-only fault-injection hook (op == "save").
+func (s *InvoiceStore) setFaultHook(h func(op string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.faultHook = h
 }
 
 // SetPG attaches the Postgres document store (H1: DATABASE_URL). When set,
@@ -168,6 +181,11 @@ func pgUniqueViolation(err error) (constraint string, ok bool) {
 func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.faultHook != nil {
+		if ferr := s.faultHook("save"); ferr != nil {
+			return "", ferr
+		}
+	}
 	if inv.IdempotencyKey != "" {
 		if id, dup := s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey]; dup && id != inv.ID {
 			prior, ok := s.byID[id]
