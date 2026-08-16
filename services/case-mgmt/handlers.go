@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -357,22 +358,32 @@ func (s *Service) handleRelCheck(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleRelList(w http.ResponseWriter, r *http.Request) {
 	if s.perm != nil {
-		writeProblem(w, 501, "not implemented",
-			"PERMIFY_URL is set: relation tuples live in the Permify server; the dev file-backed store is disabled")
+		tuples, err := s.perm.ReadRelationships(r.Context(),
+			r.URL.Query().Get("entity"), r.URL.Query().Get("relation"))
+		if err != nil {
+			log.Printf("component=case-mgmt permify relationships read failed: %v", err)
+			writeProblem(w, 502, "bad gateway", "authorization backend unavailable")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"tuples": tuples})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"tuples": s.rel.Tuples()})
 }
 
 func (s *Service) handleRelGrant(w http.ResponseWriter, r *http.Request) {
-	if s.perm != nil {
-		writeProblem(w, 501, "not implemented",
-			"PERMIFY_URL is set: write relationship tuples to the Permify server (dev file-backed grants disabled)")
-		return
-	}
 	var t RelationTuple
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&t); err != nil {
 		writeProblem(w, 400, "bad request", err.Error())
+		return
+	}
+	if s.perm != nil {
+		if err := s.perm.WriteRelationship(r.Context(), t.Entity, t.Relation, t.Subject); err != nil {
+			log.Printf("component=case-mgmt permify relationship write failed: %v", err)
+			writeProblem(w, 502, "bad gateway", "authorization backend unavailable")
+			return
+		}
+		writeJSON(w, 201, t)
 		return
 	}
 	s.rel.Grant(t)
@@ -380,14 +391,18 @@ func (s *Service) handleRelGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRelRevoke(w http.ResponseWriter, r *http.Request) {
-	if s.perm != nil {
-		writeProblem(w, 501, "not implemented",
-			"PERMIFY_URL is set: delete relationship tuples on the Permify server (dev file-backed revokes disabled)")
-		return
-	}
 	var t RelationTuple
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&t); err != nil {
 		writeProblem(w, 400, "bad request", err.Error())
+		return
+	}
+	if s.perm != nil {
+		if err := s.perm.DeleteRelationship(r.Context(), t.Entity, t.Relation, t.Subject); err != nil {
+			log.Printf("component=case-mgmt permify relationship delete failed: %v", err)
+			writeProblem(w, 502, "bad gateway", "authorization backend unavailable")
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "revoked"})
 		return
 	}
 	s.rel.Revoke(t.Entity, t.Relation, t.Subject)
