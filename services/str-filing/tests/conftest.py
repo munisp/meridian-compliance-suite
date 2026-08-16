@@ -7,7 +7,7 @@ _TMP = tempfile.mkdtemp(prefix="str-filing-test-")
 
 os.environ.setdefault("AUTH_MODE", "dev")
 os.environ["DATA_DIR"] = _TMP
-os.environ["STR_DATABASE_URL"] = f"sqlite:///{_TMP}/test.db"
+os.environ.setdefault("STR_DATABASE_URL", f"sqlite:///{_TMP}/test.db")  # env override allows real-PG runs
 os.environ["STR_NFIU_ADAPTER"] = "sim"          # SIM transport, tagged SIM
 os.environ["STR_WORKER_ENABLED"] = "false"      # tests drive the worker
 os.environ["STR_MAX_ATTEMPTS"] = "3"
