@@ -27,6 +27,37 @@ STATUS_FAILED = "failed"
 STATUS_DLQ = "dlq"
 TERMINAL = (STATUS_FILED, STATUS_DLQ)
 
+# R4 idempotency TTL: an (tenant_id, idempotency_key) replay window stays
+# open for 7 days. After it lapses an expired TERMINAL record may be purged
+# and a reused key starts a fresh filing; in-flight records are always
+# retained so a late retry can still resolve.
+IDEMPOTENCY_TTL_DAYS = int(os.environ.get("STR_IDEMPOTENCY_TTL_DAYS", "7"))
+
+
+def idempotency_expired(rec, now: datetime | None = None) -> bool:
+    """True once the record's idempotency replay window has closed."""
+    if rec.created_at is None:
+        return False
+    from datetime import timedelta
+    now = utcnow() if now is None else now
+    return now - rec.created_at > timedelta(days=IDEMPOTENCY_TTL_DAYS)
+
+
+def purge_expired_idempotency(session, now: datetime | None = None) -> int:
+    """Delete expired filings in a TERMINAL status (filed/dlq). In-flight
+    records (pending/submitting/failed-retryable) are retained regardless
+    of age. Returns the number purged."""
+    from datetime import timedelta
+    cutoff = (utcnow() if now is None else now) - timedelta(days=IDEMPOTENCY_TTL_DAYS)
+    rows = (session.query(STRFiling)
+            .filter(STRFiling.created_at < cutoff,
+                    STRFiling.status.in_(TERMINAL))
+            .all())
+    for r in rows:
+        session.delete(r)
+    session.commit()
+    return len(rows)
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)

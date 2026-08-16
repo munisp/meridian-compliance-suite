@@ -121,6 +121,14 @@ def intake_event(event: dict, *, actor: str) -> tuple[dict, bool]:
                     .filter_by(tenant_id=body.tenant_id,
                                idempotency_key=body.idempotency_key)
                     .one_or_none())
+        if existing is not None and db.idempotency_expired(existing):
+            # R4 TTL: the replay window has closed. Terminal records are
+            # purged and the reused key starts fresh; in-flight records are
+            # retained and still resolve to the original filing.
+            if existing.status in db.TERMINAL:
+                s.delete(existing)
+                s.flush()
+                existing = None
         if existing is not None:
             # w2 #6: payload binding — the stored payload_hash is compared,
             # not just the key. Same key + different payload -> 409, never a

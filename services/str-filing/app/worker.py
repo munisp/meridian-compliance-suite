@@ -177,6 +177,11 @@ class FilingWorker:
                 self.process_due()
             except Exception:
                 log.exception("worker iteration failed")
+            try:
+                with self.sessions() as s:
+                    db.purge_expired_idempotency(s)
+            except Exception:
+                log.exception("idempotency purge failed")
             stop.wait(interval)
 
 
