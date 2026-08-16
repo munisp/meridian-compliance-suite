@@ -31,30 +31,30 @@ type ReceiptLine struct {
 
 // Receipt is the canonical POS receipt (nrs.pos.receipts.v1 data payload).
 type Receipt struct {
-	ID             string            `json:"id"`
-	TenantID       string            `json:"tenant_id"`
-	MerchantTIN    string            `json:"merchant_tin"`
-	MerchantTINHash string           `json:"merchant_tin_hash"`
-	TerminalID     string            `json:"terminal_id"`
-	ReceiptNo      string            `json:"receipt_no"`
-	CapturedAt     string            `json:"captured_at"`
-	Lat            float64           `json:"lat"`
-	Lon            float64           `json:"lon"`
-	Lines          []ReceiptLine     `json:"lines"`
-	Currency       string            `json:"currency"` // NGN
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	ID              string        `json:"id"`
+	TenantID        string        `json:"tenant_id"`
+	MerchantTIN     string        `json:"merchant_tin"`
+	MerchantTINHash string        `json:"merchant_tin_hash"`
+	TerminalID      string        `json:"terminal_id"`
+	ReceiptNo       string        `json:"receipt_no"`
+	CapturedAt      string        `json:"captured_at"`
+	Lat             float64       `json:"lat"`
+	Lon             float64       `json:"lon"`
+	Lines           []ReceiptLine `json:"lines"`
+	Currency        string        `json:"currency"` // NGN
+	IdempotencyKey  string        `json:"idempotency_key,omitempty"`
 	// computed
-	Baskets        map[string]int64  `json:"baskets"` // basket -> net kobo
-	VATKobo        int64             `json:"vat_kobo"`
-	TotalKobo      int64             `json:"total_kobo"`
-	State          string            `json:"state"`
-	LGA            string            `json:"lga"`
-	Attribution    AttributionResult `json:"attribution"`
-	Status         string            `json:"status"` // ingested|spooled|settled
-	RulePackVersion string           `json:"rule_pack_version"`
+	Baskets         map[string]int64  `json:"baskets"` // basket -> net kobo
+	VATKobo         int64             `json:"vat_kobo"`
+	TotalKobo       int64             `json:"total_kobo"`
+	State           string            `json:"state"`
+	LGA             string            `json:"lga"`
+	Attribution     AttributionResult `json:"attribution"`
+	Status          string            `json:"status"` // ingested|spooled|settled
+	RulePackVersion string            `json:"rule_pack_version"`
 	// Citations: LCE SPEC §5 statute citations per computed VAT amount
 	// (additive response-layer field; empty when no VAT-bearing basket).
-	Citations      []rulepack.Citation `json:"citations,omitempty"`
+	Citations []rulepack.Citation `json:"citations,omitempty"`
 }
 
 // AttributionResult holds federal/state attribution (+ dual_shadow pair).
@@ -151,8 +151,8 @@ func writeProblem(w http.ResponseWriter, code int, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(Problem{
-		Type:   fmt.Sprintf("https://meridian.ng/problems/%d", code),
-		Title:  title, Status: code, Detail: detail,
+		Type:  fmt.Sprintf("https://meridian.ng/problems/%d", code),
+		Title: title, Status: code, Detail: detail,
 	})
 }
 

@@ -12,12 +12,12 @@ import (
 // activities through Temporal via the core temporal-sdkx package.
 
 type WorkflowStep struct {
-	Name      string        `json:"name"`
-	StartedAt string        `json:"started_at"`
-	Duration  string        `json:"duration"`
-	Attempts  int           `json:"attempts"`
-	Status    string        `json:"status"` // ok|failed
-	Detail    string        `json:"detail,omitempty"`
+	Name      string `json:"name"`
+	StartedAt string `json:"started_at"`
+	Duration  string `json:"duration"`
+	Attempts  int    `json:"attempts"`
+	Status    string `json:"status"` // ok|failed
+	Detail    string `json:"detail,omitempty"`
 }
 
 type WorkflowRun struct {

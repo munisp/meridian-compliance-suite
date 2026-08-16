@@ -30,16 +30,16 @@ type Store struct {
 }
 
 type ReconRecord struct {
-	ID           string `json:"id"`
-	Period       string `json:"period"`
-	TenantID     string `json:"tenant_id"`
-	Receipts     int    `json:"receipts"`
-	VATKobo      int64  `json:"vat_kobo"`
-	FederalKobo  int64  `json:"federal_kobo"`
-	StateKobo    int64  `json:"state_kobo"`
+	ID             string `json:"id"`
+	Period         string `json:"period"`
+	TenantID       string `json:"tenant_id"`
+	Receipts       int    `json:"receipts"`
+	VATKobo        int64  `json:"vat_kobo"`
+	FederalKobo    int64  `json:"federal_kobo"`
+	StateKobo      int64  `json:"state_kobo"`
 	LedgerTransfer string `json:"ledger_transfer_id"`
-	LedgerMode   string `json:"ledger_mode"` // core|dev
-	PostedAt     string `json:"posted_at"`
+	LedgerMode     string `json:"ledger_mode"` // core|dev
+	PostedAt       string `json:"posted_at"`
 }
 
 func NewStore(dir string) *Store {

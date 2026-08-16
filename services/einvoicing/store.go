@@ -117,6 +117,25 @@ func (s *InvoiceStore) GetByIRN(irn string) (*CanonicalInvoice, bool) {
 	return &cp, true
 }
 
+// idempotencyTTL bounds how long an Idempotency-Key replay window stays
+// open (assurance R4). After it lapses the key is treated as new; expired
+// key mappings become purge-eligible once the invoice they point at is in
+// a terminal status.
+const idempotencyTTL = 7 * 24 * time.Hour
+
+// terminalInvoiceStatuses are the lifecycle states after which an invoice
+// no longer changes: the idempotency mapping may then be safely purged.
+var terminalInvoiceStatuses = map[string]bool{"reported": true, "failed": true}
+
+// idemMappingExpired reports whether the invoice backing an idempotency
+// mapping is older than the replay window.
+func idemMappingExpired(inv *CanonicalInvoice, now time.Time) bool {
+	if inv.CreatedAt.IsZero() {
+		return false
+	}
+	return now.Sub(inv.CreatedAt) > idempotencyTTL
+}
+
 // ErrIdempotentReplay is returned (with the prior invoice) when an
 // Idempotency-Key was already consumed.
 var ErrIdempotentReplay = errors.New("idempotency key already used")
@@ -151,12 +170,17 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 	defer s.mu.Unlock()
 	if inv.IdempotencyKey != "" {
 		if id, dup := s.byIdemKey[inv.TenantID+"|"+inv.IdempotencyKey]; dup && id != inv.ID {
-			// Payload binding: same key + different core payload -> 409-class
-			// conflict, never a silent replay of the prior invoice.
-			if prior, ok := s.byID[id]; ok && prior.CoreHash() != inv.CoreHash() {
-				return id, ErrIdempotencyPayloadConflict
+			prior, ok := s.byID[id]
+			// R4 TTL: an expired mapping no longer dedups — the reused key
+			// starts a fresh invoice and the mapping is re-pointed below.
+			if ok && !idemMappingExpired(prior, time.Now()) {
+				// Payload binding: same key + different core payload -> 409-class
+				// conflict, never a silent replay of the prior invoice.
+				if prior.CoreHash() != inv.CoreHash() {
+					return id, ErrIdempotencyPayloadConflict
+				}
+				return id, ErrIdempotentReplay
 			}
-			return id, ErrIdempotentReplay
 		}
 	}
 	inv.UpdatedAt = time.Now().UTC()
@@ -219,6 +243,26 @@ func (s *InvoiceStore) List() []*CanonicalInvoice {
 		out = append(out, &cp)
 	}
 	return out
+}
+
+// PurgeExpiredIdempotencyKeys drops idempotency-key mappings whose replay
+// window has closed AND whose invoice is in a terminal status. In-flight
+// invoices (received/validated/precleared) keep their mapping so a late
+// retry still resolves to the original invoice. The invoice records
+// themselves are never touched. Returns the number of mappings purged.
+func (s *InvoiceStore) PurgeExpiredIdempotencyKeys(now time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	purged := 0
+	for key, id := range s.byIdemKey {
+		inv, ok := s.byID[id]
+		if !ok || !terminalInvoiceStatuses[inv.Status] || !idemMappingExpired(inv, now) {
+			continue
+		}
+		delete(s.byIdemKey, key)
+		purged++
+	}
+	return purged
 }
 
 // IsDuplicate reports whether supplier TIN + invoice number already exists.

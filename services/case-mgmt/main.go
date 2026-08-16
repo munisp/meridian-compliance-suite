@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-		"github.com/munisp/meridian-compliance-suite/packages/httpx"
-"github.com/munisp/meridian-compliance-suite/packages/authx"
+	"github.com/munisp/meridian-compliance-suite/packages/authx"
+	"github.com/munisp/meridian-compliance-suite/packages/httpx"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 

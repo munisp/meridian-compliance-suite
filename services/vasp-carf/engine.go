@@ -14,17 +14,17 @@ import (
 // Quantities are integer milli-asset-units; money is integer kobo (SPEC §1.3).
 
 type Trade struct {
-	ID          string `json:"id"`
-	TenantID    string `json:"tenant_id"`
-	VASPRef     string `json:"vasp_ref"`
-	UserHash    string `json:"user_hash"` // pseudonymised user ref
-	Asset       string `json:"asset"`     // e.g. BTC, ETH, USDT
-	Side        string `json:"side"`      // buy|sell
-	QtyMilli    int64  `json:"qty_milli"`
-	PriceKobo   int64  `json:"price_kobo"` // per whole asset
-	FeeKobo     int64  `json:"fee_kobo"`
-	TradedAt    string `json:"traded_at"`
-	TxHash      string `json:"tx_hash,omitempty"`
+	ID        string `json:"id"`
+	TenantID  string `json:"tenant_id"`
+	VASPRef   string `json:"vasp_ref"`
+	UserHash  string `json:"user_hash"` // pseudonymised user ref
+	Asset     string `json:"asset"`     // e.g. BTC, ETH, USDT
+	Side      string `json:"side"`      // buy|sell
+	QtyMilli  int64  `json:"qty_milli"`
+	PriceKobo int64  `json:"price_kobo"` // per whole asset
+	FeeKobo   int64  `json:"fee_kobo"`
+	TradedAt  string `json:"traded_at"`
+	TxHash    string `json:"tx_hash,omitempty"`
 }
 
 type Transfer struct {
@@ -40,25 +40,25 @@ type Transfer struct {
 
 // Lot is a FIFO cost-basis lot.
 type Lot struct {
-	QtyMilli   int64 `json:"qty_milli"`
-	CostPerUnit int64 `json:"cost_per_unit_kobo"` // per whole asset
-	AcquiredAt string `json:"acquired_at"`
+	QtyMilli    int64  `json:"qty_milli"`
+	CostPerUnit int64  `json:"cost_per_unit_kobo"` // per whole asset
+	AcquiredAt  string `json:"acquired_at"`
 }
 
 // GainLossEntry = per-asset accounting ledger entry (NOT payments).
 type GainLossEntry struct {
-	ID        string `json:"id"`
-	TenantID  string `json:"tenant_id"`
-	UserHash  string `json:"user_hash"`
-	Asset     string `json:"asset"`
-	Kind      string `json:"kind"` // disposal|transfer-out-fmv|ringfence
-	Proceeds  int64  `json:"proceeds_kobo"`
-	Basis     int64  `json:"basis_kobo"`
-	GainLoss  int64  `json:"gain_loss_kobo"` // + gain, - loss
-	Method    string `json:"method"`         // fifo|wac
-	TradeID   string `json:"trade_id,omitempty"`
-	Memo      string `json:"memo"`
-	BookedAt  string `json:"booked_at"`
+	ID       string `json:"id"`
+	TenantID string `json:"tenant_id"`
+	UserHash string `json:"user_hash"`
+	Asset    string `json:"asset"`
+	Kind     string `json:"kind"` // disposal|transfer-out-fmv|ringfence
+	Proceeds int64  `json:"proceeds_kobo"`
+	Basis    int64  `json:"basis_kobo"`
+	GainLoss int64  `json:"gain_loss_kobo"` // + gain, - loss
+	Method   string `json:"method"`         // fifo|wac
+	TradeID  string `json:"trade_id,omitempty"`
+	Memo     string `json:"memo"`
+	BookedAt string `json:"booked_at"`
 }
 
 type FMVSnapshot struct {
@@ -71,15 +71,15 @@ type FMVSnapshot struct {
 // Engine holds trades, basis lots, FMV cache, and the accounting ledger.
 // Durable via embedded append-log (honesty tag: SQLite stand-in, stdlib-only build).
 type Engine struct {
-	mu       sync.Mutex
-	dir      string
-	trades   map[string]*Trade
+	mu        sync.Mutex
+	dir       string
+	trades    map[string]*Trade
 	transfers map[string]*Transfer
-	lots     map[string][]Lot // key tenant|user|asset (FIFO queue)
-	wac      map[string]*wacState
-	fmv      map[string][]FMVSnapshot // asset -> snapshots
-	ledger   []GainLossEntry
-	logFile  *os.File
+	lots      map[string][]Lot // key tenant|user|asset (FIFO queue)
+	wac       map[string]*wacState
+	fmv       map[string][]FMVSnapshot // asset -> snapshots
+	ledger    []GainLossEntry
+	logFile   *os.File
 }
 
 type wacState struct {
@@ -270,7 +270,7 @@ func (e *Engine) bookDisposal(t *Trade, method string) (*GainLossEntry, error) {
 		ID: "gl-" + ULID(), TenantID: t.TenantID, UserHash: t.UserHash, Asset: strings.ToUpper(t.Asset),
 		Kind: "disposal", Proceeds: proceeds, Basis: basis, GainLoss: proceeds - basis,
 		Method: method, TradeID: t.ID,
-		Memo: fmt.Sprintf("disposal of %d milli-%s @ %d kobo/asset", t.QtyMilli, strings.ToUpper(t.Asset), t.PriceKobo),
+		Memo:     fmt.Sprintf("disposal of %d milli-%s @ %d kobo/asset", t.QtyMilli, strings.ToUpper(t.Asset), t.PriceKobo),
 		BookedAt: nowRFC3339(),
 	}
 	return entry, nil
@@ -475,16 +475,16 @@ func (e *Engine) Transfers(tenant string) []*Transfer {
 // digital-asset losses may only offset digital-asset gains of the same
 // user in the same period; excess losses carry forward (not sideways).
 type RingFenceResult struct {
-	TenantID      string         `json:"tenant_id"`
-	UserHash      string         `json:"user_hash"`
-	Period        string         `json:"period"`
-	GrossGains    int64          `json:"gross_gains_kobo"`
-	GrossLosses   int64          `json:"gross_losses_kobo"`
-	NetRingFenced int64          `json:"net_ring_fenced_kobo"`
-	TaxableGain   int64          `json:"taxable_gain_kobo"`
-	CarryForward  int64          `json:"carry_forward_loss_kobo"`
+	TenantID      string           `json:"tenant_id"`
+	UserHash      string           `json:"user_hash"`
+	Period        string           `json:"period"`
+	GrossGains    int64            `json:"gross_gains_kobo"`
+	GrossLosses   int64            `json:"gross_losses_kobo"`
+	NetRingFenced int64            `json:"net_ring_fenced_kobo"`
+	TaxableGain   int64            `json:"taxable_gain_kobo"`
+	CarryForward  int64            `json:"carry_forward_loss_kobo"`
 	PerAsset      map[string]int64 `json:"per_asset_gain_loss_kobo"`
-	RuleRef       string         `json:"rule_ref"`
+	RuleRef       string           `json:"rule_ref"`
 }
 
 func (e *Engine) RingFence(tenant, user, period string, pack *Pack) RingFenceResult {

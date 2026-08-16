@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-		"github.com/munisp/meridian-compliance-suite/packages/httpx"
-"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
+	"github.com/munisp/meridian-compliance-suite/packages/httpx"
+	"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
 	"github.com/munisp/meridian-compliance-suite/packages/pgmigrate"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/devjwt"

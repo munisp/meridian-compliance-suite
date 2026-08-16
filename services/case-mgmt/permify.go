@@ -2,9 +2,9 @@
 //
 // Env-selected like the other middleware (HARDENING H1/H3):
 //   - PERMIFY_URL set   -> live Permify Check API (POST
-//     /v1/tenants/{tenant}/permissions/check); the dev file-backed
-//     RelationChecker is bypassed for checks, and relation grant/revoke
-//     endpoints return 501 (tuples must be written to Permify directly).
+//     /v1/tenants/{tenant}/permissions/check) and live write path
+//     (data/relationships write|delete|read) for relation grant/revoke/list;
+//     the dev file-backed RelationChecker is bypassed.
 //   - PERMIFY_URL unset -> existing dev file-backed checker, honest log.
 //   - PROFILE=prod (or AUTH_MODE=keycloak) + PERMIFY_URL unset -> startup
 //     FAILS CLOSED: no silent decentralized authz in prod.
@@ -131,6 +131,114 @@ func (c *PermifyClient) do(ctx context.Context, url string, body []byte) (allowe
 		return *out.Allowed, false, nil
 	}
 	return out.Can == "RESULT_ALLOWED", false, nil
+}
+
+// WriteRelationship writes a relationship tuple to the Permify Data API
+// (POST /v1/tenants/{tenant}/data/relationships/write). Live mode only.
+func (c *PermifyClient) WriteRelationship(ctx context.Context, entity, relation, subject string) error {
+	ent, err := splitPermifyRef(entity)
+	if err != nil {
+		return err
+	}
+	sub, err := splitPermifyRef(subject)
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]any{
+		"metadata": map[string]any{"schema_version": ""},
+		"tuple":    map[string]any{"entity": ent, "relation": relation, "subject": sub},
+	})
+	return c.postData(ctx, "/v1/tenants/"+c.tenant+"/data/relationships/write", body)
+}
+
+// DeleteRelationship removes a relationship tuple via the Permify Data API
+// (POST /v1/tenants/{tenant}/data/relationships/delete, filter form).
+func (c *PermifyClient) DeleteRelationship(ctx context.Context, entity, relation, subject string) error {
+	ent, err := splitPermifyRef(entity)
+	if err != nil {
+		return err
+	}
+	sub, err := splitPermifyRef(subject)
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]any{
+		"filter": map[string]any{"entity": ent, "relation": relation, "subject": sub},
+	})
+	return c.postData(ctx, "/v1/tenants/"+c.tenant+"/data/relationships/delete", body)
+}
+
+// ReadRelationships lists relationship tuples matching an entity filter via
+// the Permify Data API (POST /v1/tenants/{tenant}/data/relationships/read).
+// Empty entity matches all tuples for the tenant. Each tuple is returned in
+// the service's "type:id" reference form.
+func (c *PermifyClient) ReadRelationships(ctx context.Context, entity, relation string) ([]RelationTuple, error) {
+	filter := map[string]any{"relation": relation}
+	if entity != "" {
+		ent, err := splitPermifyRef(entity)
+		if err != nil {
+			return nil, err
+		}
+		filter["entity"] = ent
+	}
+	body, _ := json.Marshal(map[string]any{"filter": filter})
+	url := c.base + "/v1/tenants/" + c.tenant + "/data/relationships/read"
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("permify relationships read transport: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("permify relationships read status %d", resp.StatusCode)
+	}
+	var out struct {
+		Tuples []struct {
+			Entity   permifyRef `json:"entity"`
+			Relation string     `json:"relation"`
+			Subject  permifyRef `json:"subject"`
+		} `json:"tuples"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("permify relationships read decode: %w", err)
+	}
+	tuples := make([]RelationTuple, 0, len(out.Tuples))
+	for _, t := range out.Tuples {
+		tuples = append(tuples, RelationTuple{
+			Entity:   t.Entity.Type + ":" + t.Entity.ID,
+			Relation: t.Relation,
+			Subject:  t.Subject.Type + ":" + t.Subject.ID,
+		})
+	}
+	return tuples, nil
+}
+
+// postData POSTs to a Permify data endpoint, requiring a 2xx response.
+func (c *PermifyClient) postData(ctx context.Context, path string, body []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("permify data transport: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("permify data status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // wirePermify selects the authz backend. Returns (client, error); error only

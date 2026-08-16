@@ -272,11 +272,11 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 // settlePeriod executes the federal+state VAT settlement as a compensated
 // saga with a durable settled_periods marker (F5, audit Flow 5):
 //
-//	1. upsert marker (status=pending) with BOTH deterministic pending ids
-//	2. create the two pending transfers (idempotent by deterministic id)
-//	3. post both legs; if the second leg fails, void it and REVERSE the
-//	   first leg (compensated pair) — federal and state never split
-//	4. mark settled
+//  1. upsert marker (status=pending) with BOTH deterministic pending ids
+//  2. create the two pending transfers (idempotent by deterministic id)
+//  3. post both legs; if the second leg fails, void it and REVERSE the
+//     first leg (compensated pair) — federal and state never split
+//  4. mark settled
 //
 // A crash at any point leaves a marker the next run resumes from actual
 // ledger state (GetTransfer per leg).
@@ -326,7 +326,7 @@ func (s *Service) settlePeriod(tenant, period, merchant string, federal, state i
 			for _, other := range legs {
 				if postedLegs[other.name] {
 					_, _ = s.ledger.Transfer(LedgerTransfer{
-						ID: DeterministicTransferID("posv-rev:" + tenant + ":" + period + ":" + other.name),
+						ID:             DeterministicTransferID("posv-rev:" + tenant + ":" + period + ":" + other.name),
 						DebitAccountID: other.account, CreditAccountID: merchant,
 						AmountKobo: other.amount, Ledger: LedgerVATRemittance, Code: 3})
 				}
@@ -462,7 +462,7 @@ func (s *Service) handleCertRun(w http.ResponseWriter, r *http.Request) {
 	report := map[string]any{
 		"cert_id": "cert-" + digest[:16], "tenant_id": req.TenantID, "run_at": nowRFC3339(),
 		"checks": checks, "passed": passed, "failed": checks - passed,
-		"verdict": map[bool]string{true: "PASS", false: "FAIL"}[len(failures) == 0],
+		"verdict":  map[bool]string{true: "PASS", false: "FAIL"}[len(failures) == 0],
 		"failures": failures, "rule_pack_version": s.packs.VersionTag(),
 		"digest": digest,
 	}
