@@ -26,6 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from prometheus_client import generate_latest
+from sqlalchemy.exc import IntegrityError
 
 from . import authz, bus, db
 from .audit import audit_from_env
@@ -147,7 +148,24 @@ def intake_event(event: dict, *, actor: str) -> tuple[dict, bool]:
             max_attempts=int(os.environ.get("STR_MAX_ATTEMPTS", "5")),
         )
         s.add(rec)
-        s.flush()
+        try:
+            s.flush()
+        except IntegrityError:
+            # UniqueConstraint(tenant_id, idempotency_key) race (R7): a
+            # concurrent intake committed the same key between our read and
+            # our write. Resolve as a replay of the winning row — with the
+            # same payload binding as the read path — never a 500.
+            s.rollback()
+            winner = (s.query(db.STRFiling)
+                      .filter_by(tenant_id=body.tenant_id,
+                                 idempotency_key=body.idempotency_key)
+                      .one_or_none())
+            if winner is None:
+                raise
+            if winner.payload_hash and winner.payload_hash != payload_hash:
+                raise IdempotencyPayloadConflict(
+                    "idempotency key already used with a different payload")
+            return winner.to_dict(), False
         audit.record(actor=actor, str_id=rec.id, tenant_id=rec.tenant_id,
                      old_status="", new_status=db.STATUS_PENDING,
                      str_hash=payload_hash, detail="str created")
