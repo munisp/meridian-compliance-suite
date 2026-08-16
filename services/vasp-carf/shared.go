@@ -89,7 +89,7 @@ func writeProblem(w http.ResponseWriter, code int, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(Problem{
-		Type: fmt.Sprintf("https://meridian.ng/problems/%d", code),
+		Type:  fmt.Sprintf("https://meridian.ng/problems/%d", code),
 		Title: title, Status: code, Detail: detail,
 	})
 }

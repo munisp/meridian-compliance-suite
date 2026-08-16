@@ -15,44 +15,44 @@ import (
 // ---------- OECD CARF XML message model (structured subset of CARF v1) ----------
 
 type CARFMessage struct {
-	XMLName  xml.Name       `xml:"CARF_OECD"`
-	Xmlns    string         `xml:"xmlns,attr"`
-	Version  string         `xml:"version,attr"`
-	Spec     CARFMessageSpec `xml:"MessageSpec"`
-	Body     CARFBody       `xml:"CARFBody"`
+	XMLName xml.Name        `xml:"CARF_OECD"`
+	Xmlns   string          `xml:"xmlns,attr"`
+	Version string          `xml:"version,attr"`
+	Spec    CARFMessageSpec `xml:"MessageSpec"`
+	Body    CARFBody        `xml:"CARFBody"`
 }
 
 type CARFMessageSpec struct {
-	SendingCompanyIN   string `xml:"SendingCompanyIN"`
+	SendingCompanyIN    string `xml:"SendingCompanyIN"`
 	TransmittingCountry string `xml:"TransmittingCountry"`
-	ReceivingCountry   string `xml:"ReceivingCountry"`
-	MessageType        string `xml:"MessageType"`
-	MessageRefId       string `xml:"MessageRefId"`
-	ReportingPeriod    string `xml:"ReportingPeriod"`
-	Timestamp          string `xml:"Timestamp"`
+	ReceivingCountry    string `xml:"ReceivingCountry"`
+	MessageType         string `xml:"MessageType"`
+	MessageRefId        string `xml:"MessageRefId"`
+	ReportingPeriod     string `xml:"ReportingPeriod"`
+	Timestamp           string `xml:"Timestamp"`
 }
 
 type CARFBody struct {
-	DocSpec       *CARFDocSpec  `xml:"DocSpec,omitempty"`
-	ReportingVASP CARFVASP      `xml:"ReportingVASP"`
+	DocSpec       *CARFDocSpec `xml:"DocSpec,omitempty"`
+	ReportingVASP CARFVASP     `xml:"ReportingVASP"`
 }
 
 type CARFDocSpec struct {
-	DocTypeIndic    string `xml:"DocTypeIndic"` // OECD1 new | OECD2 correction | OECD3 deletion
+	DocTypeIndic     string `xml:"DocTypeIndic"` // OECD1 new | OECD2 correction | OECD3 deletion
 	CorrMessageRefId string `xml:"CorrMessageRefId,omitempty"`
 }
 
 type CARFVASP struct {
-	Name    string     `xml:"VASPDetails>Name"`
-	TINHash string     `xml:"VASPDetails>TINHash"`
-	Country string     `xml:"VASPDetails>Country"`
+	Name    string       `xml:"VASPDetails>Name"`
+	TINHash string       `xml:"VASPDetails>TINHash"`
+	Country string       `xml:"VASPDetails>Country"`
 	Reports []UserReport `xml:"UserReport"`
 }
 
 type UserReport struct {
-	UserHash     string                 `xml:"ReportableUser>UserHash"`
-	TINHash      string                 `xml:"ReportableUser>TINHash"`
-	Country      string                 `xml:"ReportableUser>Country"`
+	UserHash     string                   `xml:"ReportableUser>UserHash"`
+	TINHash      string                   `xml:"ReportableUser>TINHash"`
+	Country      string                   `xml:"ReportableUser>Country"`
 	Transactions []CryptoAssetTransaction `xml:"CryptoAssetTransaction"`
 }
 
@@ -68,19 +68,19 @@ type CryptoAssetTransaction struct {
 // ---------- message registry ----------
 
 type CARFRecord struct {
-	ID             string `json:"id"`
-	MessageRefId   string `json:"message_ref_id"`
-	Period         string `json:"period"`
-	TenantID       string `json:"tenant_id"`
-	DocTypeIndic   string `json:"doc_type_indic"`
-	CorrOf         string `json:"corr_of,omitempty"`
-	CorrectionReason string `json:"correction_reason,omitempty"`
-	Users          int    `json:"users"`
-	Transactions   int    `json:"transactions"`
-	BuiltAt        string `json:"built_at"`
-	Status         string `json:"status"` // built|transmitted|refused|superseded
-	XML            string `json:"xml"`
-	Validation     []string `json:"validation"`
+	ID               string   `json:"id"`
+	MessageRefId     string   `json:"message_ref_id"`
+	Period           string   `json:"period"`
+	TenantID         string   `json:"tenant_id"`
+	DocTypeIndic     string   `json:"doc_type_indic"`
+	CorrOf           string   `json:"corr_of,omitempty"`
+	CorrectionReason string   `json:"correction_reason,omitempty"`
+	Users            int      `json:"users"`
+	Transactions     int      `json:"transactions"`
+	BuiltAt          string   `json:"built_at"`
+	Status           string   `json:"status"` // built|transmitted|refused|superseded
+	XML              string   `json:"xml"`
+	Validation       []string `json:"validation"`
 }
 
 // CARFStore mirrors the durable DocStore pattern used by sibling services
@@ -254,11 +254,11 @@ func ValidateCARF(rec *CARFRecord, packs *PackSet) []string {
 	problems := []string{}
 	required := packs.CARFRequiredFields()
 	present := map[string]bool{
-		"message_ref_id": rec.MessageRefId != "",
-		"timestamp":      rec.BuiltAt != "",
-		"reporting_vasp": rec.TenantID != "",
+		"message_ref_id":  rec.MessageRefId != "",
+		"timestamp":       rec.BuiltAt != "",
+		"reporting_vasp":  rec.TenantID != "",
 		"reportable_user": rec.Users > 0,
-		"transactions":   rec.Transactions > 0,
+		"transactions":    rec.Transactions > 0,
 	}
 	for _, f := range required {
 		if !present[f] {
