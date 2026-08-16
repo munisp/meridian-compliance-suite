@@ -66,10 +66,10 @@ func TestPurgeExpiredIdempotencyKeysTerminalOnly(t *testing.T) {
 		aged.CreatedAt = created
 		store.byID[id] = &aged
 	}
-	mk("i1", "k1", "reported", old)             // expired terminal -> purge
-	mk("i2", "k2", "failed", old)               // expired terminal -> purge
-	mk("i3", "k3", "validated", old)            // expired in-flight -> keep
-	mk("i4", "k4", "reported", time.Now())      // fresh terminal -> keep
+	mk("i1", "k1", "reported", old)        // expired terminal -> purge
+	mk("i2", "k2", "failed", old)          // expired terminal -> purge
+	mk("i3", "k3", "validated", old)       // expired in-flight -> keep
+	mk("i4", "k4", "reported", time.Now()) // fresh terminal -> keep
 
 	if n := store.PurgeExpiredIdempotencyKeys(time.Now()); n != 2 {
 		t.Fatalf("expected 2 purged, got %d", n)

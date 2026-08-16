@@ -414,8 +414,8 @@ func (ps *PackSet) fetchFromRegistry(id string) (*Pack, error) {
 		return p, nil
 	}
 	var wrapper struct {
-		YAML  string `json:"yaml"`
-		Raw   string `json:"raw"`
+		YAML    string `json:"yaml"`
+		Raw     string `json:"raw"`
 		Content string `json:"content"`
 	}
 	if err := jsonUnmarshal(body, &wrapper); err == nil {

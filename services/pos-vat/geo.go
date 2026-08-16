@@ -54,9 +54,9 @@ func (c *HTTPGeoClient) AttributePoint(lat, lon float64) (GeoAttribution, error)
 type EmbeddedGeo struct{}
 
 type bbox struct {
-	state              string
-	minLat, maxLat     float64
-	minLon, maxLon     float64
+	state          string
+	minLat, maxLat float64
+	minLon, maxLon float64
 }
 
 // Coarse bounding boxes (lat 4.0–13.9N, lon 2.7–14.7E for Nigeria).
@@ -101,8 +101,8 @@ var stateBoxes = []bbox{
 }
 
 type lgaCentroid struct {
-	lga       string
-	lat, lon  float64
+	lga      string
+	lat, lon float64
 }
 
 // Major commercial LGAs (centroid approximations, coarse).

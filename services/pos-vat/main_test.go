@@ -39,12 +39,12 @@ func TestBasketClassification(t *testing.T) {
 	ps := NewPackSet(Config{})
 	ps.LoadPacks()
 	cases := map[string]string{
-		"basic_food":        "zero_rated",
-		"pharmacy":          "zero_rated",
+		"basic_food":         "zero_rated",
+		"pharmacy":           "zero_rated",
 		"financial_services": "exempt",
-		"residential_rent":  "exempt",
-		"electronics":       "standard_75",
-		"":                  "standard_75",
+		"residential_rent":   "exempt",
+		"electronics":        "standard_75",
+		"":                   "standard_75",
 	}
 	for cat, want := range cases {
 		if got := ps.BasketFor(cat); got != want {
