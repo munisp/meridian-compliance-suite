@@ -36,17 +36,32 @@ func (s *Service) handleIngestReceipt(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 422, "validation failed", "receipt_no and at least one line are required")
 		return
 	}
-	// idempotency (hot cache: Redis or in-mem)
+	// idempotency (A1-01/A1-13): the receipt ID is deterministically derived
+	// from the idempotency key (rcpt-<idemHash(idem)>), so the durable store
+	// is the dedup of record and an identical Idempotency-Key replay can
+	// never ingest a second receipt (double VAT/settlement). Hot cache is a
+	// fast path only and fails closed on error.
 	idem := req.IdempotencyKey
 	if idem == "" {
 		idem = req.MerchantTIN + ":" + req.TerminalID + ":" + req.ReceiptNo
 	}
-	ok, err := s.cache.SetNX("idem:"+idem, "1", 24*time.Hour)
-	if err == nil && !ok {
-		if existing, found := s.store.GetReceipt("rcpt-" + idemHash(idem)); found {
+	idemKey := "rcpt-" + idemHash(idem)
+	if existing, found := s.store.GetReceipt(idemKey); found {
+		writeJSON(w, 200, map[string]any{"status": "duplicate", "receipt": existing})
+		return
+	}
+	ok, err := s.cache.SetNX("idem:"+idem, "1", 7*24*time.Hour) // 7-day TTL per platform policy
+	if err != nil {
+		writeProblem(w, 503, "idempotency store unavailable", err.Error())
+		return
+	}
+	if !ok {
+		if existing, found := s.store.GetReceipt(idemKey); found {
 			writeJSON(w, 200, map[string]any{"status": "duplicate", "receipt": existing})
 			return
 		}
+		writeProblem(w, 409, "conflict", "a request with this Idempotency-Key is already in progress")
+		return
 	}
 
 	if req.StoreAndForward {
@@ -83,13 +98,15 @@ func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 // processReceipt runs wf-vat-normalise + wf-vat-attribution inline (hot path).
 func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 	if rc.ID == "" {
-		rc.ID = "rcpt-" + idemHash(idem+ULID())
+		// deterministic, idempotency-key-bound ID (A1-01): dedup lookup in
+		// handleIngestReceipt must hit on replay.
+		rc.ID = "rcpt-" + idemHash(idem)
 	}
 	if rc.Currency == "" {
 		rc.Currency = "NGN"
 	}
 	rc.RulePackVersion = s.packs.VersionTag()
-	rc.MerchantTINHash = TINHash(rc.MerchantTIN, env("TIN_HMAC_KEY", "meridian-dev-tin-key"))
+	rc.MerchantTINHash = TINHash(rc.MerchantTIN, s.tinKey)
 	if rc.CapturedAt == "" {
 		rc.CapturedAt = nowRFC3339()
 	}
