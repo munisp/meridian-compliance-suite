@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { api, kobo } from '../api'
+import { api, errMsg, kobo } from '../api'
 import { Card, Empty, ErrorNote, Field, MoneyInput, PageTitle, SkeletonRows } from '../components/ui'
 
 export default function Pos() {
@@ -9,13 +9,19 @@ export default function Pos() {
   const [form, setForm] = useState({ merchant_tin: '12345678-0001', terminal: 'POS-01', lat: '6.5244', lon: '3.3792', category: 'electronics', store_forward: false })
   const [amountKobo, setAmountKobo] = useState<number | null>(2_500_000)
   const [error, setError] = useState<any>(null)
+  const [loadErr, setLoadErr] = useState('')
   const [tenant] = useState('demo-retailer')
   const [recon, setRecon] = useState<any>(null)
 
   const load = () => {
-    api('pos').get(`/v1/receipts?tenant_id=${tenant}&limit=50`).then((r) => setReceipts(r.data.receipts || [])).catch(() => {})
-    api('pos').get(`/v1/variance?tenant_id=${tenant}`).then((r) => setVariance(r.data)).catch(() => {})
-    api('pos').get('/v1/attribution/mode').then((r) => setMode(r.data)).catch(() => {})
+    setLoadErr('')
+    const errs: string[] = []
+    api('pos').get(`/v1/receipts?tenant_id=${tenant}&limit=50`).then((r) => setReceipts(r.data.receipts || []))
+      .catch((e) => { errs.push(errMsg(e)); setLoadErr(errs.join(' · ')) })
+    api('pos').get(`/v1/variance?tenant_id=${tenant}`).then((r) => setVariance(r.data))
+      .catch((e) => { errs.push(errMsg(e)); setLoadErr(errs.join(' · ')) })
+    api('pos').get('/v1/attribution/mode').then((r) => setMode(r.data))
+      .catch((e) => { errs.push(errMsg(e)); setLoadErr(errs.join(' · ')) })
   }
   useEffect(load, [])
 
@@ -44,6 +50,8 @@ export default function Pos() {
   return (
     <div className="space-y-5">
       <PageTitle title="Retailer POS Dashboard" sub="Receipt ingest · capture-time state/LGA attribution · variance detection (T6)" />
+
+      {loadErr && <ErrorNote error={loadErr} />}
 
       {mode && (
         <div className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-700">

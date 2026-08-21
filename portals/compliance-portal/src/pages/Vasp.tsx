@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { api, kobo } from '../api'
+import { api, errMsg, kobo } from '../api'
 import { Card, Empty, ErrorNote, Field, MoneyInput, PageTitle, Status } from '../components/ui'
 
 export default function Vasp() {
@@ -12,11 +12,16 @@ export default function Vasp() {
   const [carf, setCarf] = useState<any>(null)
   const [carfList, setCarfList] = useState<any[]>([])
   const [error, setError] = useState<any>(null)
+  const [loadErr, setLoadErr] = useState('')
   const [tenant] = useState('demo-vasp')
 
   const loadGates = () => {
-    api('vasp').get('/v1/gates').then((r) => setGates(r.data.gates || {})).catch(() => {})
-    api('vasp').get('/v1/carf/messages').then((r) => setCarfList(r.data.messages || [])).catch(() => {})
+    setLoadErr('')
+    const errs: string[] = []
+    api('vasp').get('/v1/gates').then((r) => setGates(r.data.gates || {}))
+      .catch((e) => { errs.push(errMsg(e)); setLoadErr(errs.join(' · ')) })
+    api('vasp').get('/v1/carf/messages').then((r) => setCarfList(r.data.messages || []))
+      .catch((e) => { errs.push(errMsg(e)); setLoadErr(errs.join(' · ')) })
   }
   useEffect(loadGates, [])
 
@@ -61,6 +66,8 @@ export default function Vasp() {
   return (
     <div className="space-y-5">
       <PageTitle title="VASP / CARF Console" sub="Trade ingest · FIFO/WAC cost basis · ring-fence · OECD CARF builder with gate enforcement (T10)" />
+
+      {loadErr && <ErrorNote error={loadErr} />}
 
       <div className={`rounded-xl border px-4 py-3 text-sm flex items-center justify-between ${
         transmitClosed ? 'border-warning-strong/40 bg-warning text-warning-on' : 'border-success-strong/40 bg-success text-success-on'}`}>
