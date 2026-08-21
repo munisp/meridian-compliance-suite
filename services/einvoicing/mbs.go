@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -175,10 +176,17 @@ func (h *HTTPMBS) ReportB2C(ctx context.Context, inv *CanonicalInvoice) (*B2CRep
 }
 
 // NewMBSClient selects the adapter: real HTTP rail when MBS_BASE_URL is set,
-// otherwise the sandbox simulator.
+// otherwise the sandbox simulator — DEV ONLY (QA-22). Under PROFILE=prod a
+// regulated e-invoice submission must never be "precleared" by the sandbox
+// simulator, so prod refuses to boot without an explicit MBS_BASE_URL
+// (hard-fatal, same contract as the NIMC adapter in inclusion-suite).
 func NewMBSClient() MBSClient {
 	if base := os.Getenv("MBS_BASE_URL"); base != "" {
 		return &HTTPMBS{BaseURL: base}
 	}
+	if os.Getenv("PROFILE") == "prod" || os.Getenv("PROFILE") == "production" {
+		log.Fatal("PROFILE=prod FATAL: MBS_BASE_URL is required (refusing to start with the MBS sandbox simulator)")
+	}
+	log.Printf("profile=dev component=mbs-adapter (sandbox simulator)")
 	return NewSandboxMBS()
 }
