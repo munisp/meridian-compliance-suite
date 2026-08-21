@@ -1,6 +1,6 @@
-fastapi
-uvicorn
-pydantic
-httpx
-pytest
-psycopg[binary]>=3.1
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.4
+httpx==0.28.1
+pytest==9.1.1
+psycopg[binary]==3.3.4
