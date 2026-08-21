@@ -30,11 +30,37 @@ def _prod() -> bool:
             or os.environ.get("AUTH_MODE", "").lower() in ("keycloak", "prod"))
 
 
+def _keycloak_mode() -> bool:
+    return os.environ.get("AUTH_MODE", "").lower() in ("keycloak", "prod")
+
+
+def _meridian_py_importable() -> bool:
+    try:
+        import meridian_py.dev_jwt  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def validate_authz_config() -> None:
     if _prod() and not os.environ.get("PERMIFY_URL"):
         raise RuntimeError(
             "prod profile but PERMIFY_URL is unset; refusing to start "
             "(no dev authz fallback)")
+    # A1-03: never silently downgrade keycloak-mode token verification to
+    # the HS256 dev secret. In keycloak/prod mode the platform verifier
+    # (meridian_py) AND the OIDC issuer config are mandatory at boot.
+    if _keycloak_mode():
+        if not _meridian_py_importable():
+            raise RuntimeError(
+                "AUTH_MODE=keycloak but meridian_py is not importable "
+                "(install packages/py); refusing to start — no HS256 "
+                "dev-secret downgrade")
+        if not os.environ.get("KEYCLOAK_ISSUER") and not os.environ.get(
+                "KEYCLOAK_JWKS_URL"):
+            raise RuntimeError(
+                "AUTH_MODE=keycloak but KEYCLOAK_ISSUER/KEYCLOAK_JWKS_URL "
+                "is unset; refusing to start (no dev fallback)")
 
 
 def _split_ref(ref: str) -> dict:
@@ -91,12 +117,24 @@ def _principal(request: Request) -> dict:
     auth = request.headers.get("Authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else ""
     if token:
+        if _keycloak_mode():
+            # Fail closed (A1-03): keycloak mode NEVER decodes with the
+            # HS256 dev secret. Boot validation guarantees meridian_py.
+            try:
+                from meridian_py import dev_jwt
+            except ImportError:
+                log.error("component=authz keycloak mode but meridian_py "
+                          "missing; denying (fail-closed)")
+                return {}
+            try:
+                return dev_jwt.verify_keycloak_token(token)
+            except Exception:
+                return {}
         try:
             from meridian_py import dev_jwt  # platform shared auth package
-            if os.environ.get("AUTH_MODE", "dev").lower() in ("keycloak", "prod"):
-                return dev_jwt.verify_keycloak_token(token)
             return dev_jwt.verify_token(token)
         except ImportError:
+            # dev profile only: HS256 with the dev secret
             import jwt
             secret = os.environ.get("MERIDIAN_DEV_JWT_SECRET",
                                     "meridian-dev-secret-change-me-32!")
