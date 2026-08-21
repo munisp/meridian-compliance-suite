@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -207,9 +208,30 @@ type Service struct {
 	bus    *InprocBus
 	cache  Cache // redis or in-mem idempotency/hot cache
 	http   *http.Client
+	tinKey string // resolved TIN pseudonymisation HMAC key (A1-02)
+}
+
+// resolveTINKey resolves the TIN pseudonymisation HMAC key. Fail-closed
+// (A1-02): in prod (PROFILE=prod or AUTH_MODE=keycloak) an explicit,
+// non-default TIN_HMAC_KEY is required — the public dev default would make
+// TIN hashes reversible by dictionary attack.
+func resolveTINKey(cfg Config) (string, error) {
+	key := os.Getenv("TIN_HMAC_KEY")
+	prod := os.Getenv("PROFILE") == "prod" || cfg.AuthMode == "keycloak"
+	if key == "" || key == "meridian-dev-tin-key" {
+		if prod {
+			return "", fmt.Errorf("PROFILE=prod/AUTH_MODE=keycloak requires an explicit non-default TIN_HMAC_KEY; refusing to start with the public dev key")
+		}
+		key = "meridian-dev-tin-key"
+	}
+	return key, nil
 }
 
 func NewService(cfg Config) *Service {
+	tinKey, err := resolveTINKey(cfg)
+	if err != nil {
+		log.Fatalf("pos-vat: %v", err)
+	}
 	var cache Cache
 	if cfg.RedisURL != "" {
 		rc := NewRedisCache(cfg.RedisURL)
@@ -237,7 +259,7 @@ func NewService(cfg Config) *Service {
 	return &Service{
 		cfg: cfg, store: NewStore(cfg.DataDir), geo: geo, ledger: ledger,
 		packs: NewPackSet(cfg), bus: NewInprocBus(), cache: cache,
-		http: &http.Client{Timeout: 4 * time.Second},
+		http: &http.Client{Timeout: 4 * time.Second}, tinKey: tinKey,
 	}
 }
 
