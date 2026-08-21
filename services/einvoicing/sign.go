@@ -96,8 +96,14 @@ func (s *CSIDSigner) SignPayload(payload string) string {
 // SignPayloadE signs an arbitrary payload, returning hex signature; errors
 // from a provider-backed (HSM/KMS) signer are returned to the caller.
 func (s *CSIDSigner) SignPayloadE(payload string) (string, error) {
+	return s.SignPayloadECtx(context.Background(), payload)
+}
+
+// SignPayloadECtx is SignPayloadE with caller context threading (QA-27):
+// provider-backed (HSM/KMS) signing honours request cancellation/deadlines.
+func (s *CSIDSigner) SignPayloadECtx(ctx context.Context, payload string) (string, error) {
 	if s.prov != nil {
-		sig, err := s.prov.Sign(context.Background(), "csid", []byte(payload))
+		sig, err := s.prov.Sign(ctx, "csid", []byte(payload))
 		if err != nil {
 			return "", fmt.Errorf("csid sign: %w", err)
 		}
@@ -109,7 +115,12 @@ func (s *CSIDSigner) SignPayloadE(payload string) (string, error) {
 
 // SignInvoice signs the canonical invoice hash and records it on the invoice.
 func (s *CSIDSigner) SignInvoice(inv *CanonicalInvoice) error {
-	sig, err := s.SignPayloadE(inv.Hash())
+	return s.SignInvoiceCtx(context.Background(), inv)
+}
+
+// SignInvoiceCtx is SignInvoice with caller context threading (QA-27).
+func (s *CSIDSigner) SignInvoiceCtx(ctx context.Context, inv *CanonicalInvoice) error {
+	sig, err := s.SignPayloadECtx(ctx, inv.Hash())
 	if err != nil {
 		return err
 	}

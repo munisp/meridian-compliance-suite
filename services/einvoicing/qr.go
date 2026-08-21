@@ -60,8 +60,14 @@ func QRPayload(inv *CanonicalInvoice) (payload, signature string) {
 // HMAC to the HSM/KMS ("qr-hmac" keyID); otherwise the legacy QR_HMAC_KEY /
 // dev key is used (unchanged behaviour).
 func qrMAC(prov provider.SignerProvider, payload string) ([]byte, error) {
+	return qrMACCtx(context.Background(), prov, payload)
+}
+
+// qrMACCtx is qrMAC with caller context threading (QA-27): provider-backed
+// HMAC requests honour request cancellation/deadlines.
+func qrMACCtx(ctx context.Context, prov provider.SignerProvider, payload string) ([]byte, error) {
 	if prov != nil && prov.Mode() != "software" {
-		return prov.Sign(context.Background(), "qr-hmac", []byte(payload))
+		return prov.Sign(ctx, "qr-hmac", []byte(payload))
 	}
 	mac := hmac.New(sha256.New, qrKey())
 	mac.Write([]byte(payload))
@@ -71,9 +77,14 @@ func qrMAC(prov provider.SignerProvider, payload string) ([]byte, error) {
 // QRPayloadE is QRPayload with an explicit key provider; HSM/KMS signing
 // errors are returned (fail-closed — no unsigned QR is ever produced).
 func QRPayloadE(prov provider.SignerProvider, inv *CanonicalInvoice) (payload, signature string, err error) {
+	return QRPayloadECtx(context.Background(), prov, inv)
+}
+
+// QRPayloadECtx is QRPayloadE with caller context threading (QA-27).
+func QRPayloadECtx(ctx context.Context, prov provider.SignerProvider, inv *CanonicalInvoice) (payload, signature string, err error) {
 	ts := strings.NewReplacer("-", "", ":", "", "T", "", "Z", "").Replace(inv.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"))
 	payload = fmt.Sprintf("NRS1|%s|%s|%d|%s", inv.IRN, inv.Supplier.TIN, inv.PayableKobo, ts)
-	sum, err := qrMAC(prov, payload)
+	sum, err := qrMACCtx(ctx, prov, payload)
 	if err != nil {
 		return "", "", fmt.Errorf("qr sign: %w", err)
 	}

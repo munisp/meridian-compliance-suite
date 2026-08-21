@@ -109,7 +109,10 @@ func wfNRSEinvoice(ctx context.Context, srv *Server, invoiceID string, rec func(
 	// signature feeds the verification QR payload.
 	err = retryActivity(ctx, nrsStepIRNSign, 3, rec, func() (string, error) {
 		payload := "NRS-IRN-SIGN-V1|" + inv.IRN + "|" + inv.Supplier.TIN + "|" + inv.Hash()
-		sig := srv.signer.SignPayload(payload)
+		sig, serr := srv.signer.SignPayloadECtx(ctx, payload)
+		if serr != nil {
+			return "", serr
+		}
 		inv.Stamp = &CryptoStamp{
 			Algorithm: "ed25519", KeyID: srv.signer.KeyID(),
 			IRN: inv.IRN, Payload: payload, Signature: sig,
@@ -151,10 +154,10 @@ func wfNRSEinvoice(ctx context.Context, srv *Server, invoiceID string, rec func(
 	// point the invoice number and all core data are immutable (only
 	// payment_status / payment_reference remain mutable via PATCH).
 	err = retryActivity(ctx, nrsStepSign, 3, rec, func() (string, error) {
-		srv.signer.SignInvoice(inv)
+		srv.signer.SignInvoiceCtx(ctx, inv)
 		inv.SignedCoreHash = inv.CoreHash()
 		inv.Status = "signed"
-		if _, err := srv.store.Save(inv); err != nil {
+		if _, err := srv.store.SaveCtx(ctx, inv); err != nil {
 			return "", err
 		}
 		return "invoice signed; core fields locked", nil
