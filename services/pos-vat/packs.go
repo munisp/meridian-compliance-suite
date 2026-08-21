@@ -7,7 +7,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+// registryHTTPClient bounds pack-registry fetches (QA-29): the default
+// http.Client has no timeout and could hang a request worker indefinitely.
+var registryHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // ---------- minimal YAML-subset parser (offline-resilient; no external deps) ----------
 // Supports: nested block maps, block lists ("- "), scalars (null/bool/int/float/
@@ -400,7 +405,7 @@ func (ps *PackSet) fetchFromRegistry(id string) (*Pack, error) {
 	if ps.cfg.RegistryURL == "" {
 		return nil, fmt.Errorf("no registry configured")
 	}
-	resp, err := http.Get(ps.cfg.RegistryURL + "/v1/packs/" + id + "/latest")
+	resp, err := registryHTTPClient.Get(ps.cfg.RegistryURL + "/v1/packs/" + id + "/latest")
 	if err != nil {
 		return nil, err
 	}

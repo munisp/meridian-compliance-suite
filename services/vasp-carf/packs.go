@@ -8,7 +8,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+// registryHTTPClient bounds pack-registry fetches (QA-29): the default
+// http.Client has no timeout and could hang a request worker indefinitely.
+var registryHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // ---------- rp-* pack model (SPEC §1.4) ----------
 
@@ -115,7 +120,7 @@ func (ps *PackSet) fetch(id string) (*Pack, error) {
 	if ps.registryURL == "" {
 		return nil, fmt.Errorf("no registry")
 	}
-	resp, err := http.Get(ps.registryURL + "/v1/packs/" + id + "/latest")
+	resp, err := registryHTTPClient.Get(ps.registryURL + "/v1/packs/" + id + "/latest")
 	if err != nil {
 		return nil, err
 	}
