@@ -46,6 +46,13 @@ export function api(key: ServiceKey): AxiosInstance {
   return clients[key]!
 }
 
+// errMsg extracts a human-readable message from a failed api call
+// (RFC7807 detail -> axios message -> fallback), mirroring the core admin
+// F-13 pattern: load failures must surface, not masquerade as empty states.
+export function errMsg(e: any): string {
+  return e?.friendlyMessage || e?.message || String(e)
+}
+
 // Money is kobo integers end-to-end; formatNGN (lib/format) is the single
 // sanctioned formatter (Meridian One §9). `kobo` stays as a null-safe alias.
 import { formatNGN } from './lib/format'
