@@ -151,7 +151,7 @@ func wfMBSPreclearance(ctx context.Context, srv *Server, invoiceID string, rec f
 	}
 	// Step 2: CSID sign
 	err = retryActivity(ctx, "csid-sign", 3, rec, func() (string, error) {
-		if err := srv.signer.SignInvoice(inv); err != nil {
+		if err := srv.signer.SignInvoiceCtx(ctx, inv); err != nil {
 			return "", err
 		}
 		return "signed with " + srv.signer.KeyID(), nil

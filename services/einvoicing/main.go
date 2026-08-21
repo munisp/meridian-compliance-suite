@@ -342,7 +342,7 @@ func (s *Server) handleGetQR(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 409, "not cleared", "invoice has no IRN yet — run pre-clearance first")
 		return
 	}
-	payload, sig, err := QRPayloadE(s.keyProv, inv)
+	payload, sig, err := QRPayloadECtx(r.Context(), s.keyProv, inv)
 	if err != nil {
 		devjwt.Problem(w, 500, "qr signing error", err.Error())
 		return

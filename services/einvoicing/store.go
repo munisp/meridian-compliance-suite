@@ -179,6 +179,12 @@ func pgUniqueViolation(err error) (constraint string, ok bool) {
 // Save persists (append+fsync) and indexes the invoice. Returns the prior
 // invoice id if the idempotency key already exists.
 func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
+	return s.SaveCtx(context.Background(), inv)
+}
+
+// SaveCtx is Save with caller context threading (QA-27): the DB persist path
+// honours request cancellation/deadlines.
+func (s *InvoiceStore) SaveCtx(ctx context.Context, inv *CanonicalInvoice) (priorID string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.faultHook != nil {
@@ -221,7 +227,7 @@ func (s *InvoiceStore) Save(inv *CanonicalInvoice) (priorID string, err error) {
 		return "", err
 	}
 	if s.docs != nil {
-		if err := s.docs.Put(context.Background(), "invoices", inv.ID, line); err != nil {
+		if err := s.docs.Put(ctx, "invoices", inv.ID, line); err != nil {
 			if constraint, ok := pgUniqueViolation(err); ok {
 				// DB-side uniqueness (multi-instance safe): map to the
 				// same conflict semantics the in-memory maps provide.
