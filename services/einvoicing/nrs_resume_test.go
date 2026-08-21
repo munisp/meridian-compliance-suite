@@ -33,7 +33,7 @@ func TestNRSResumeOnRetryAfterMidFlowCrash(t *testing.T) {
 	srv1, mux1 := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
 	n.IRN = "INVRES1-94ND90NR-20260127"
-	if err := srv1.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv1.webhooks.Register(n.BusinessID, "tenant-test", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	var saves atomic.Int32
@@ -49,7 +49,7 @@ func TestNRSResumeOnRetryAfterMidFlowCrash(t *testing.T) {
 
 	// restart: fresh server over the same durable dir, healthy rails
 	srv2, mux2 := newNRSTestServerAt(t, dir, &InprocWebhookSink{})
-	if err := srv2.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv2.webhooks.Register(n.BusinessID, "tenant-test", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,7 +111,7 @@ func TestNRSRecoverySweepConfirmsInterrupted(t *testing.T) {
 	srv1, mux1 := newNRSTestServerAt(t, dir, &InprocWebhookSink{})
 	n := sampleNRSPayload()
 	n.IRN = "INVSWP1-94ND90NR-20260127"
-	if err := srv1.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv1.webhooks.Register(n.BusinessID, "tenant-test", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	var saves atomic.Int32
@@ -127,7 +127,7 @@ func TestNRSRecoverySweepConfirmsInterrupted(t *testing.T) {
 
 	// restart and sweep — no client retry involved
 	srv2, _ := newNRSTestServerAt(t, dir, &InprocWebhookSink{})
-	if err := srv2.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv2.webhooks.Register(n.BusinessID, "tenant-test", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	if n2 := srv2.RecoverInterruptedNRS(context.Background()); n2 != 1 {
