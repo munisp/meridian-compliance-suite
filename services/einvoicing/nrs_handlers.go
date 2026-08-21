@@ -199,8 +199,37 @@ func (s *Server) handleNRSUpdate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// hasAnyRole reports whether the principal holds any of the given roles.
+func hasAnyRole(have []string, want ...string) bool {
+	for _, h := range have {
+		for _, w2 := range want {
+			if h == w2 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // handleWebhookRegister registers a stakeholder webhook for a business.
+// A1-05: ownership + role gated — the caller must be an authenticated
+// admin/operator whose tenant owns the business (first registration binds
+// the business to the tenant; the invoice store is cross-checked so a
+// tenant can never register callbacks for another tenant's business).
 func (s *Server) handleWebhookRegister(w http.ResponseWriter, r *http.Request) {
+	claims, ok := devjwt.FromContext(r)
+	if !ok || claims.Sub == "" {
+		devjwt.Problem(w, 401, "unauthorized", "authentication required")
+		return
+	}
+	if !hasAnyRole(claims.Roles, "admin", "operator") {
+		devjwt.Problem(w, 403, "forbidden", "admin or operator role required")
+		return
+	}
+	if claims.TenantID == "" {
+		devjwt.Problem(w, 403, "forbidden", "tenant claim required")
+		return
+	}
 	var req struct {
 		BusinessID string `json:"business_id"`
 		URL        string `json:"url"`
@@ -210,17 +239,45 @@ func (s *Server) handleWebhookRegister(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 400, "bad request", err.Error())
 		return
 	}
-	if err := s.webhooks.Register(req.BusinessID, req.URL, req.Secret); err != nil {
-		devjwt.Problem(w, 422, "webhook registration failed", err.Error())
+	// BOLA cross-check against durable invoice data: any existing invoice
+	// for this business owned by another tenant denies registration.
+	for _, inv := range s.store.List() {
+		if inv.BusinessID == req.BusinessID && inv.TenantID != "" && inv.TenantID != claims.TenantID {
+			devjwt.Problem(w, 403, "forbidden", "business is owned by another tenant")
+			return
+		}
+	}
+	if err := s.webhooks.Register(req.BusinessID, claims.TenantID, req.URL, req.Secret); err != nil {
+		status := 422
+		if strings.Contains(err.Error(), "owned by another tenant") {
+			status = 403
+		}
+		devjwt.Problem(w, status, "webhook registration failed", err.Error())
 		return
 	}
 	writeJSON(w, 201, map[string]any{"registered": req.URL, "business_id": req.BusinessID})
 }
 
 // handleWebhookList lists registered endpoints (secrets redacted) and
-// delivery history.
+// delivery history. A1-05: tenant-scoped — only the owning tenant may list.
 func (s *Server) handleWebhookList(w http.ResponseWriter, r *http.Request) {
+	claims, ok := devjwt.FromContext(r)
+	if !ok || claims.Sub == "" {
+		devjwt.Problem(w, 401, "unauthorized", "authentication required")
+		return
+	}
 	businessID := r.URL.Query().Get("business_id")
+	if businessID != "" {
+		owner := s.webhooks.Owner(businessID)
+		if owner != "" && owner != claims.TenantID {
+			devjwt.Problem(w, 403, "forbidden", "business is owned by another tenant")
+			return
+		}
+		if owner == "" && claims.TenantID == "" {
+			devjwt.Problem(w, 403, "forbidden", "tenant claim required")
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"endpoints":  s.webhooks.Endpoints(businessID),
 		"deliveries": s.webhooks.Deliveries(),

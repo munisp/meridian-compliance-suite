@@ -284,7 +284,7 @@ func TestWebhookSignatureVerify(t *testing.T) {
 
 func TestWebhookDeliveryOnTransmit(t *testing.T) {
 	srv, sink, mux := newNRSTestServer(t)
-	if err := srv.webhooks.Register("biz-acme", "https://stakeholder.example/hook", "topsecret"); err != nil {
+	if err := srv.webhooks.Register("biz-acme", "t1", "https://stakeholder.example/hook", "topsecret"); err != nil {
 		t.Fatal(err)
 	}
 	irn := confirmedInvoice(t, mux)
@@ -311,7 +311,7 @@ func TestWebhookDeliveryOnTransmit(t *testing.T) {
 func TestWebhookRetryBackoff(t *testing.T) {
 	sink := &InprocWebhookSink{Fail: errors.New("connection refused")}
 	reg := NewWebhookRegistry(sink)
-	if err := reg.Register("biz-1", "https://x.example/h", "s"); err != nil {
+	if err := reg.Register("biz-1", "t1", "https://x.example/h", "s"); err != nil {
 		t.Fatal(err)
 	}
 	err := reg.Notify(context.Background(), "biz-1", "test.v1", map[string]string{"k": "v"})
@@ -339,26 +339,28 @@ func TestWebhookNoEndpointsTransmissionSucceeds(t *testing.T) {
 
 func TestWebhookRegisterValidation(t *testing.T) {
 	reg := NewWebhookRegistry(&InprocWebhookSink{})
-	if err := reg.Register("", "https://x", "s"); err == nil {
+	if err := reg.Register("", "t1", "https://x", "s"); err == nil {
 		t.Fatal("empty business accepted")
 	}
-	if err := reg.Register("b", "ftp://x", "s"); err == nil {
+	if err := reg.Register("b", "t1", "ftp://x", "s"); err == nil {
 		t.Fatal("non-http url accepted")
 	}
-	if err := reg.Register("b", "https://x", "s"); err != nil {
+	if err := reg.Register("b", "t1", "https://x", "s"); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.Register("b", "https://x", "s"); err == nil {
+	if err := reg.Register("b", "t1", "https://x", "s"); err == nil {
 		t.Fatal("duplicate accepted")
 	}
 	t.Setenv("ENV", "production")
-	if err := reg.Register("b2", "http://insecure", "0123456789abcdef"); err == nil {
+	if err := reg.Register("b2", "t1", "http://insecure", "0123456789abcdef"); err == nil {
 		t.Fatal("http accepted in prod (fail-closed broken)")
 	}
-	if err := reg.Register("b2", "https://x", "short"); err == nil {
+	if err := reg.Register("b2", "t1", "https://x", "short"); err == nil {
 		t.Fatal("weak secret accepted in prod (fail-closed broken)")
 	}
-	if err := reg.Register("b2", "https://x", "0123456789abcdef"); err != nil {
-		t.Fatalf("strong https registration rejected in prod: %v", err)
+	if err := reg.Register("b2", "t1", "https://x", "0123456789abcdef"); err == nil {
+		// A1-05: prod refuses callbacks whose host does not resolve (SSRF
+		// fail-closed); "x" has no DNS record.
+		t.Fatal("unresolvable webhook host accepted in prod (SSRF fail-closed broken)")
 	}
 }

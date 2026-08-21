@@ -97,7 +97,7 @@ func TestNRSTransmitAmbiguityReconverges(t *testing.T) {
 	srv.webhooks = NewWebhookRegistry(sink)
 	n := sampleNRSPayload()
 	n.IRN = "INVAMB1-94ND90NR-20260127"
-	if err := srv.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	rec := postNRS(t, mux, n)
@@ -140,7 +140,7 @@ func TestNRSConnectionResetMidCall(t *testing.T) {
 	srv, mux := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
 	n.IRN = "INVRST1-94ND90NR-20260127"
-	if err := srv.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	rec := postNRS(t, mux, n)
@@ -205,7 +205,7 @@ func TestNRSCrashAfterProviderEffectBeforePersist(t *testing.T) {
 	srv, mux := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
 	n.IRN = "INVKAP1-94ND90NR-20260127"
-	if err := srv.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	// db fault armed after the draft save: the transmit-step save (after the
@@ -255,7 +255,7 @@ func TestNRSDelayedRestartRecovery(t *testing.T) {
 	srv1, mux1 := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
 	n.IRN = "INVDLY1-94ND90NR-20260127"
-	if err := srv1.webhooks.Register(n.BusinessID, "https://stakeholder/hook", "sekret"); err != nil {
+	if err := srv1.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
 	rec := postNRS(t, mux1, n)
