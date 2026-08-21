@@ -354,6 +354,11 @@ func middlewareConfigFromEnv() (mode string, kc *KeycloakVerifier, err error) {
 		if kc == nil {
 			return "", nil, errors.New("AUTH_MODE=keycloak requires KEYCLOAK_ISSUER; refusing to start (fail-closed, no dev-auth downgrade)")
 		}
+		// A1-08: in prod the audience is mandatory — otherwise any token
+		// minted for any client of the realm is accepted (aud confusion).
+		if os.Getenv("PROFILE") == "prod" && kc.Audience == "" {
+			return "", nil, errors.New("PROFILE=prod requires KEYCLOAK_AUDIENCE to be set explicitly; refusing to start (fail-closed)")
+		}
 		return mode, kc, nil
 	}
 	if os.Getenv("PROFILE") == "prod" {

@@ -222,6 +222,7 @@ func TestMiddlewareKeycloakRejectsDevRoleHeader(t *testing.T) {
 	t.Setenv("AUTH_MODE", "keycloak")
 	t.Setenv("KEYCLOAK_ISSUER", srv.URL)
 	t.Setenv("KEYCLOAK_JWKS_URL", srv.URL)
+	t.Setenv("KEYCLOAK_AUDIENCE", "nrs-api") // mandatory in prod (A1-08)
 	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
 	}))
