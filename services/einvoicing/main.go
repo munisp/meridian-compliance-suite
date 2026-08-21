@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/munisp/meridian-compliance-suite/packages/httpx"
@@ -53,6 +54,10 @@ type Server struct {
 	runner     *InprocRunner
 	serviceIDs *ServiceIDRegistry
 	webhooks   *WebhookRegistry
+	// FF-6: per-invoice in-flight guard serializing workflow drivers
+	// (handler / retry-resume / recovery sweep) — see nrs_resume.go.
+	resumeMu       sync.Mutex
+	resumeInFlight map[string]bool
 }
 
 func dataDir() string {
@@ -203,6 +208,10 @@ func main() {
 		srv.webhooks.Sink = &InprocWebhookSink{}
 	}
 	registerWorkflows(srv.runner)
+	// FF-6: resume e-invoices interrupted mid-flow by a crash (boot pass +
+	// periodic sweep); deterministic IRN + idempotent steps keep the
+	// no-double-issuance invariant.
+	srv.startNRSRecoverySweep(ctx, 10*time.Second)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

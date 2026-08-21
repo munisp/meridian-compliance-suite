@@ -78,6 +78,11 @@ func (s *Server) handleNRSCreate(w http.ResponseWriter, r *http.Request) {
 	// Idempotent resubmission: same IRN -> same invoice, no duplicate.
 	if n.IRN != "" {
 		if existing, ok := s.store.GetByIRN(strings.TrimSpace(n.IRN)); ok {
+			// FF-6: a mid-flow record (crash before confirmation) is RESUMED,
+			// not returned stale; terminal records replay as before.
+			if nrsInterimStatus(existing) && s.resumeInterrupted(w, r, existing.ID) {
+				return
+			}
 			writeJSON(w, 200, nrsResponse(s, existing, nil, true))
 			return
 		}
@@ -106,13 +111,24 @@ func (s *Server) handleNRSCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		prior, _ := s.store.Get(priorID)
+		// FF-6: resume a mid-flow record on idempotency-key replay.
+		if nrsInterimStatus(prior) && s.resumeInterrupted(w, r, prior.ID) {
+			return
+		}
 		writeJSON(w, 200, nrsResponse(s, prior, nil, true))
 		return
 	} else if err != nil {
 		writeStoreConflict(w, err)
 		return
 	}
-	run, err := s.runner.Run(r.Context(), s, "wf-nrs-einvoice", inv.ID)
+	// Guarded run (FF-6): if the recovery sweep is already driving this
+	// invoice, serve the current durable record instead of double-driving.
+	run, started, err := s.runNRSWorkflow(r.Context(), inv.ID)
+	if !started {
+		stored, _ := s.store.Get(inv.ID)
+		writeJSON(w, 202, nrsResponse(s, stored, nil, false))
+		return
+	}
 	if err != nil {
 		stored, _ := s.store.Get(inv.ID)
 		w.Header().Set("Content-Type", "application/json")
