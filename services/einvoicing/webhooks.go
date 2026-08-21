@@ -16,7 +16,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -100,6 +102,7 @@ func (s *InprocWebhookSink) Post(ctx context.Context, url string, body []byte, h
 type WebhookRegistry struct {
 	mu         sync.RWMutex
 	byBusiness map[string][]WebhookEndpoint
+	owners     map[string]string // businessID -> owning tenant (A1-05 BOLA binding)
 	deliveries []WebhookDelivery
 	Sink       WebhookSink
 }
@@ -108,7 +111,15 @@ func NewWebhookRegistry(sink WebhookSink) *WebhookRegistry {
 	if sink == nil {
 		sink = &HTTPWebhookSink{}
 	}
-	return &WebhookRegistry{byBusiness: map[string][]WebhookEndpoint{}, Sink: sink}
+	return &WebhookRegistry{byBusiness: map[string][]WebhookEndpoint{}, owners: map[string]string{}, Sink: sink}
+}
+
+// Owner returns the tenant that owns a business's webhook registrations
+// ("" if unbound).
+func (r *WebhookRegistry) Owner(businessID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.owners[businessID]
 }
 
 func prodEnv() bool {
@@ -116,41 +127,108 @@ func prodEnv() bool {
 	return strings.Contains(e, "prod")
 }
 
-// Register adds an endpoint for a business. Fail-closed in production:
-// HTTPS only and a strong secret required.
-func (r *WebhookRegistry) Register(businessID, url, secret string) error {
+// devProfile reports whether non-prod conveniences (http callbacks, private
+// egress targets) are permitted. PROFILE=prod or ENV/APP_ENV containing
+// "prod" means production.
+func devProfile() bool {
+	return !prodEnv() && strings.ToLower(os.Getenv("PROFILE")) != "prod"
+}
+
+// isPrivateEgressIP reports whether ip is loopback, RFC1918, link-local, or
+// unspecified — destinations a webhook callback must never reach in prod
+// (SSRF guard, A1-05).
+func isPrivateEgressIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// validateWebhookURL enforces the outbound-callback policy (A1-05 SSRF):
+//   - scheme: https always; http only in dev
+//   - WEBHOOK_URL_ALLOWLIST (comma-separated host suffixes), when set, is
+//     an allowlist the callback host must match
+//   - DNS-resolved addresses must not be loopback/RFC1918/link-local/
+//     unspecified outside dev
+func validateWebhookURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("webhook url invalid")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return fmt.Errorf("webhook url must be http(s)")
+	}
+	if scheme == "http" && !devProfile() {
+		return fmt.Errorf("webhook url must be https in production")
+	}
+	host := strings.ToLower(u.Hostname())
+	if allow := os.Getenv("WEBHOOK_URL_ALLOWLIST"); allow != "" {
+		ok := false
+		for _, suffix := range strings.Split(allow, ",") {
+			suffix = strings.ToLower(strings.TrimSpace(suffix))
+			if suffix != "" && (host == suffix || strings.HasSuffix(host, "."+suffix)) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("webhook host %s not in WEBHOOK_URL_ALLOWLIST", host)
+		}
+	}
+	if !devProfile() {
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return fmt.Errorf("webhook host does not resolve: %v", err)
+		}
+		for _, ip := range ips {
+			if isPrivateEgressIP(ip) {
+				return fmt.Errorf("webhook host %s resolves to a non-public address (%s); refused outside dev", host, ip)
+			}
+		}
+	}
+	return nil
+}
+
+// Register adds an endpoint for a business, bound to the owning tenant
+// (A1-05 BOLA): ownerTenant is required; the first registration binds the
+// business to that tenant and later registrations from other tenants are
+// rejected. Fail-closed in production: HTTPS only and a strong secret
+// required.
+func (r *WebhookRegistry) Register(businessID, ownerTenant, urlStr, secret string) error {
 	if strings.TrimSpace(businessID) == "" {
 		return fmt.Errorf("business_id required")
 	}
-	if strings.TrimSpace(url) == "" {
+	if strings.TrimSpace(ownerTenant) == "" {
+		return fmt.Errorf("owning tenant required")
+	}
+	if strings.TrimSpace(urlStr) == "" {
 		return fmt.Errorf("webhook url required")
 	}
-	lower := strings.ToLower(url)
-	if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
-		return fmt.Errorf("webhook url must be http(s)")
+	if err := validateWebhookURL(urlStr); err != nil {
+		return err
 	}
 	if prodEnv() {
-		if !strings.HasPrefix(lower, "https://") {
-			return fmt.Errorf("webhook url must be https in production")
-		}
 		if len(secret) < 16 {
 			return fmt.Errorf("webhook secret must be >= 16 bytes in production")
 		}
 	}
 	if secret == "" {
 		// dev convenience: deterministic per-endpoint secret
-		sum := sha256.Sum256([]byte("meridian-dev-webhook|" + businessID + "|" + url))
+		sum := sha256.Sum256([]byte("meridian-dev-webhook|" + businessID + "|" + urlStr))
 		secret = hex.EncodeToString(sum[:8])
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if owner, bound := r.owners[businessID]; bound && owner != ownerTenant {
+		return fmt.Errorf("business %s is owned by another tenant", businessID)
+	}
 	for _, ep := range r.byBusiness[businessID] {
-		if ep.URL == url {
-			return fmt.Errorf("webhook %s already registered for %s", url, businessID)
+		if ep.URL == urlStr {
+			return fmt.Errorf("webhook %s already registered for %s", urlStr, businessID)
 		}
 	}
+	r.owners[businessID] = ownerTenant
 	r.byBusiness[businessID] = append(r.byBusiness[businessID], WebhookEndpoint{
-		URL: url, Secret: secret, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		URL: urlStr, Secret: secret, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	return nil
 }
