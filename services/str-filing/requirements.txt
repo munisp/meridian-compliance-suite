@@ -9,3 +9,6 @@ psycopg[binary]==3.3.4
 prometheus-client==0.26.0
 kafka-python==3.0.10
 pyjwt==2.13.0
+# Internal shared auth package (packages/py) — REQUIRED in prod/keycloak mode
+# (A1-03: boot fails closed without it). Install: pip install -e ../../packages/py
+meridian-py @ file:../../packages/py
