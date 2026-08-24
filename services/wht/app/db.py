@@ -36,6 +36,10 @@ class Deduction(Base):
     period = Column(String, index=True)   # YYYY-MM of deduction_date
     remitted = Column(Boolean, default=False)
     remit_batch = Column(String, default="")
+    # B3 #20: idempotency bindings are payload-bound — replaying an
+    # idempotency key with a different request payload is a conflict, not
+    # a silent replay of the original deduction.
+    payload_hash = Column(String, default="")
 
     __table_args__ = (
         Index("ix_wht_ded_vendor_period", "vendor_tin", "period"),
@@ -69,6 +73,10 @@ def _migrate(eng) -> None:
         if "tenant_id" not in cols:
             # backfill note: pre-tenant rows get '' (single-tenant default)
             c.execute(text("ALTER TABLE wht_credits ADD COLUMN tenant_id VARCHAR DEFAULT ''"))
+        ded_cols = {col["name"] for col in insp.get_columns("wht_deductions")}
+        if "payload_hash" not in ded_cols:
+            # B3 #20 backfill: pre-existing rows get '' (unbound legacy)
+            c.execute(text("ALTER TABLE wht_deductions ADD COLUMN payload_hash VARCHAR DEFAULT ''"))
         if eng.dialect.name == "postgresql":
             # int4 -> int8 for kobo columns (overflow above ₦21,474,836.47)
             for table, col in (("wht_deductions", "amount_kobo"),
@@ -89,6 +97,21 @@ def engine():
 
 def session() -> Session:
     return Session(engine())
+
+
+def acquire_credit_lock(sess: Session, tenant_id: str, vendor_tin: str) -> None:
+    """Serialize credit check+insert per credit account on Postgres
+    (B3 #10, R3 verifier): on READ COMMITTED two concurrent
+    INSERT ... SELECT ... WHERE balance >= need statements each snapshot
+    BEFORE the other commits, so both insert and the ledger overdraws.
+    pg_advisory_xact_lock serializes the whole check+insert transaction
+    per (tenant, vendor) account key and is released automatically at
+    commit/rollback. On SQLite this is a no-op: the conditional INSERT is
+    already atomic there (SQLite serializes writes database-wide)."""
+    if sess.get_bind().dialect.name == "postgresql":
+        sess.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+            {"k": f"wht-credit:{tenant_id}:{vendor_tin}"})
 
 
 def now() -> str:
