@@ -152,9 +152,12 @@ func (s *Server) handleNRSUpdate(w http.ResponseWriter, r *http.Request) {
 		devjwt.Problem(w, 404, "not found", "invoice with irn "+irn)
 		return
 	}
-	if claims, ok := devjwt.FromContext(r); ok && claims.TenantID != "" &&
-		inv.TenantID != "" && inv.TenantID != claims.TenantID {
-		devjwt.Problem(w, 404, "not found", "invoice with irn "+irn)
+	// B4-4: tenantGuard semantics — an empty tenant_id claim against a
+	// tenant-owned invoice is a 403 (never a void check), cross-tenant is
+	// a 404 (no existence oracle). The previous inline check skipped the
+	// guard entirely when the caller's tenant claim was empty (inverted
+	// polarity), allowing cross-tenant payment_status forgery.
+	if !tenantGuard(w, r, inv) {
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -294,8 +297,14 @@ func (s *Server) handleWebhookList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// B4-13: delivery history must be tenant-scoped — an empty tenant claim
+	// is a 403, and callers only ever see their own tenant's deliveries.
+	if claims.TenantID == "" {
+		devjwt.Problem(w, 403, "forbidden", "tenant claim required")
+		return
+	}
 	writeJSON(w, 200, map[string]any{
 		"endpoints":  s.webhooks.Endpoints(businessID),
-		"deliveries": s.webhooks.Deliveries(),
+		"deliveries": s.webhooks.DeliveriesFor(claims.TenantID),
 	})
 }
