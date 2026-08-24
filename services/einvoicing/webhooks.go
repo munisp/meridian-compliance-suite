@@ -34,11 +34,12 @@ type WebhookEndpoint struct {
 
 // WebhookDelivery records one delivery attempt outcome (audit/debug).
 type WebhookDelivery struct {
-	URL       string `json:"url"`
-	Event     string `json:"event"`
-	Attempts  int    `json:"attempts"`
-	Status    string `json:"status"` // delivered|failed
-	LastError string `json:"last_error,omitempty"`
+	URL        string `json:"url"`
+	Event      string `json:"event"`
+	Attempts   int    `json:"attempts"`
+	Status     string `json:"status"` // delivered|failed
+	LastError  string `json:"last_error,omitempty"`
+	BusinessID string `json:"business_id"` // B4-13: enables tenant scoping
 }
 
 // WebhookSink performs the actual POST. The HTTP sink is the default; the
@@ -251,6 +252,22 @@ func (r *WebhookRegistry) Deliveries() []WebhookDelivery {
 	return out
 }
 
+// DeliveriesFor returns delivery history scoped to a single tenant
+// (B4-13): only deliveries for businesses the tenant owns are included.
+// Deliveries recorded before business tagging (empty BusinessID) are
+// withheld rather than leaked cross-tenant.
+func (r *WebhookRegistry) DeliveriesFor(tenant string) []WebhookDelivery {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []WebhookDelivery{}
+	for _, d := range r.deliveries {
+		if d.BusinessID != "" && r.owners[d.BusinessID] == tenant {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // SignWebhook computes the X-Meridian-Signature value (HMAC-SHA256 hex).
 func SignWebhook(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -289,7 +306,7 @@ func (r *WebhookRegistry) Notify(ctx context.Context, businessID, event string, 
 			"X-Meridian-Event":     event,
 			"X-Meridian-Signature": SignWebhook(ep.Secret, body),
 		}
-		d := WebhookDelivery{URL: ep.URL, Event: event, Status: "delivered"}
+		d := WebhookDelivery{URL: ep.URL, Event: event, Status: "delivered", BusinessID: businessID}
 		var postErr error
 		for attempt := 1; attempt <= 3; attempt++ {
 			d.Attempts = attempt
