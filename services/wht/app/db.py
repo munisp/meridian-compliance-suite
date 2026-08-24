@@ -99,6 +99,21 @@ def session() -> Session:
     return Session(engine())
 
 
+def acquire_credit_lock(sess: Session, tenant_id: str, vendor_tin: str) -> None:
+    """Serialize credit check+insert per credit account on Postgres
+    (B3 #10, R3 verifier): on READ COMMITTED two concurrent
+    INSERT ... SELECT ... WHERE balance >= need statements each snapshot
+    BEFORE the other commits, so both insert and the ledger overdraws.
+    pg_advisory_xact_lock serializes the whole check+insert transaction
+    per (tenant, vendor) account key and is released automatically at
+    commit/rollback. On SQLite this is a no-op: the conditional INSERT is
+    already atomic there (SQLite serializes writes database-wide)."""
+    if sess.get_bind().dialect.name == "postgresql":
+        sess.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+            {"k": f"wht-credit:{tenant_id}:{vendor_tin}"})
+
+
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 

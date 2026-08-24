@@ -242,9 +242,14 @@ class ApplyCreditIn(BaseModel):
 def apply_credit(vendor_tin: str, body: ApplyCreditIn, principal=AuthDep):
     # B3 #10: the old SUM-then-check-then-insert sequence raced — two
     # concurrent applies could both pass the balance check and overdraw
-    # the credit ledger. The guard is now a single atomic statement: the
+    # the credit ledger. The guard is a single atomic statement: the
     # INSERT only happens WHERE the current balance covers the amount, so
     # the check and the debit commit as one database operation.
+    # R3 verifier: that statement is atomic on SQLite but races on Postgres
+    # READ COMMITTED (both concurrent statements snapshot pre-race -> both
+    # insert -> overdraw). On Postgres the whole transaction is therefore
+    # serialized per credit account with pg_advisory_xact_lock BEFORE the
+    # balance-checking insert (see db.acquire_credit_lock).
     import hashlib
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
@@ -252,6 +257,7 @@ def apply_credit(vendor_tin: str, body: ApplyCreditIn, principal=AuthDep):
         f"idem:{body.idempotency_key}".encode()).hexdigest()[:12]
         if body.idempotency_key else f"cr-{uuid.uuid4().hex[:12]}")
     with db.session() as sess:
+        db.acquire_credit_lock(sess, principal_tenant(), vendor_tin)
         if body.idempotency_key:
             existing = sess.get(db.Credit, cid)
             if existing is not None:
