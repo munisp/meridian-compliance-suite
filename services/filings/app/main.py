@@ -6,13 +6,17 @@ from __future__ import annotations
 import os
 from datetime import date
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import assessment, cit, paye, vat
+from . import assessment, authz, cit, paye, vat
+from meridian_py.dev_jwt import Principal
 
 app = FastAPI(title="filings", version="1.0.0")
+
+# B2 #1: fail closed at boot when prod/keycloak auth is misconfigured
+authz.validate_auth_config()
 
 vat_store = vat.VatReturnStore()
 paye_store = paye.PayeReturnStore()
@@ -52,7 +56,8 @@ class VatFileIn(BaseModel):
 
 
 @app.post("/v1/filings/vat", status_code=201)
-def file_vat(body: VatFileIn):
+def file_vat(body: VatFileIn, principal: Principal = Depends(authz.require_filer)):
+    authz.require_tin_scope(principal, body.tin)
     try:
         ret = vat.build_return(body.tin, body.period, body.invoices,
                                body.sales_schedule, body.purchases,
@@ -64,7 +69,9 @@ def file_vat(body: VatFileIn):
 
 
 @app.get("/v1/filings/vat/{tin}/{period}")
-def get_vat(tin: str, period: str):
+def get_vat(tin: str, period: str,
+            principal: Principal = Depends(authz.require_reader)):
+    authz.require_tin_scope(principal, tin)
     rec = vat_store.get(tin, period)
     if rec is None:
         raise HTTPException(status_code=404, detail="no VAT return for tin/period")
@@ -81,7 +88,9 @@ class PayeFileIn(BaseModel):
 
 
 @app.post("/v1/filings/paye", status_code=201)
-def file_paye(body: PayeFileIn):
+def file_paye(body: PayeFileIn,
+              principal: Principal = Depends(authz.require_filer)):
+    authz.require_tin_scope(principal, body.employer_tin)
     try:
         sched = paye.build_monthly_schedule(body.employer_tin, body.period,
                                             body.employees)
@@ -92,7 +101,9 @@ def file_paye(body: PayeFileIn):
 
 
 @app.post("/v1/filings/paye/h1")
-def build_h1(employer_tin: str, year: int):
+def build_h1(employer_tin: str, year: int,
+             principal: Principal = Depends(authz.require_filer)):
+    authz.require_tin_scope(principal, employer_tin)
     try:
         return paye.build_form_h1(employer_tin, year,
                                   paye_store.for_year(employer_tin, year))
@@ -113,7 +124,9 @@ class CitComputeIn(BaseModel):
 
 
 @app.post("/v1/filings/cit/compute")
-def compute_cit(body: CitComputeIn):
+def compute_cit(body: CitComputeIn,
+                principal: Principal = Depends(authz.require_filer)):
+    authz.require_tin_scope(principal, body.tin)
     try:
         return cit.compute_return(body.tin, body.fye,
                                   body.assessable_profit_kobo,
@@ -138,7 +151,8 @@ class AssessmentIssueIn(BaseModel):
 
 
 @app.post("/v1/assessments", status_code=201)
-def issue_assessment(body: AssessmentIssueIn):
+def issue_assessment(body: AssessmentIssueIn,
+                     principal: Principal = Depends(authz.require_officer)):
     try:
         return asm_store.issue(body.tin, body.tax_type, body.period, body.kind,
                                body.amount_kobo, body.grounds,
@@ -148,15 +162,17 @@ def issue_assessment(body: AssessmentIssueIn):
 
 
 @app.get("/v1/assessments/tat-referrals")
-def tat_referrals():
+def tat_referrals(principal: Principal = Depends(authz.require_officer)):
     return {"referrals": asm_store.tat_referrals()}
 
 
 @app.get("/v1/assessments/{assessment_id}")
-def get_assessment(assessment_id: str):
+def get_assessment(assessment_id: str,
+                   principal: Principal = Depends(authz.require_reader)):
     rec = asm_store.get(assessment_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="unknown assessment")
+    authz.require_tin_scope(principal, rec["tin"])
     return rec
 
 
@@ -168,7 +184,12 @@ class ObjectionIn(BaseModel):
 
 
 @app.post("/v1/assessments/{assessment_id}/objections", status_code=201)
-def file_objection(assessment_id: str, body: ObjectionIn):
+def file_objection(assessment_id: str, body: ObjectionIn,
+                   principal: Principal = Depends(authz.require_filer)):
+    rec = asm_store.get(assessment_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="unknown assessment")
+    authz.require_tin_scope(principal, rec["tin"])
     try:
         return asm_store.object(assessment_id, body.grounds,
                                 body.admitted_amount_kobo,
@@ -184,7 +205,8 @@ class DecisionIn(BaseModel):
 
 
 @app.post("/v1/objections/{objection_id}/decision")
-def decide_objection(objection_id: str, body: DecisionIn):
+def decide_objection(objection_id: str, body: DecisionIn,
+                     principal: Principal = Depends(authz.require_officer)):
     try:
         return asm_store.decide(objection_id, body.outcome, body.decided_at,
                                 body.revised_amount_kobo)
@@ -193,5 +215,5 @@ def decide_objection(objection_id: str, body: DecisionIn):
 
 
 @app.post("/v1/assessments/tick")
-def tick(today: date):
+def tick(today: date, principal: Principal = Depends(authz.require_officer)):
     return {"events": asm_store.tick(today)}
