@@ -37,6 +37,8 @@ type ReconRecord struct {
 	VATKobo        int64  `json:"vat_kobo"`
 	FederalKobo    int64  `json:"federal_kobo"`
 	StateKobo      int64  `json:"state_kobo"`
+	LGAKobo        int64  `json:"lga_kobo"`
+	Supplement     int    `json:"supplement,omitempty"` // 0 = initial settlement
 	LedgerTransfer string `json:"ledger_transfer_id"`
 	LedgerMode     string `json:"ledger_mode"` // core|dev
 	PostedAt       string `json:"posted_at"`
@@ -86,6 +88,32 @@ func (st *Store) PutReceipt(r *Receipt) error {
 	}
 	st.receipts[r.ID] = r
 	st.byTenant[r.TenantID] = append(st.byTenant[r.TenantID], r.ID)
+	return nil
+}
+
+// MarkReceiptsSettled durably stamps each receipt with the settlement it
+// was remitted under (B3 #2). The appended log line is the last write for
+// the receipt id, so replay restores the settled marker.
+func (st *Store) MarkReceiptsSettled(ids []string, tenant, period string) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for _, id := range ids {
+		r, ok := st.receipts[id]
+		if !ok {
+			continue
+		}
+		r.SettledIn = settledKey(tenant, period)
+		r.Status = "settled"
+		if st.logFile != nil {
+			b, _ := json.Marshal(r)
+			if _, err := st.logFile.Write(append(b, '\n')); err != nil {
+				return err
+			}
+		}
+	}
+	if st.logFile != nil {
+		return st.logFile.Sync()
+	}
 	return nil
 }
 
@@ -139,12 +167,17 @@ type SettledPeriod struct {
 	Period           string `json:"period"`
 	FederalKobo      int64  `json:"federal_kobo"`
 	StateKobo        int64  `json:"state_kobo"`
+	LGAKobo          int64  `json:"lga_kobo"` // B3 #2: LGA 35% share leg
 	FederalPendingID string `json:"federal_pending_id,omitempty"`
 	StatePendingID   string `json:"state_pending_id,omitempty"`
-	Status           string `json:"status"` // pending|settled|failed
-	ReconID          string `json:"recon_id,omitempty"`
-	FailReason       string `json:"fail_reason,omitempty"`
-	UpdatedAt        string `json:"updated_at"`
+	LGAPendingID     string `json:"lga_pending_id,omitempty"`
+	// Supplements counts supplemental settlements remitting receipts that
+	// arrived AFTER this period first settled (B3 #2 carry-over).
+	Supplements int    `json:"supplements,omitempty"`
+	Status      string `json:"status"` // pending|settled|failed
+	ReconID     string `json:"recon_id,omitempty"`
+	FailReason  string `json:"fail_reason,omitempty"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 var settledPeriods = struct {

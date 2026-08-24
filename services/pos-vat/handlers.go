@@ -156,19 +156,25 @@ func computeAttribution(vat int64, state string, acfg AttributionConfig) Attribu
 	res := AttributionResult{Mode: acfg.Mode, State: state}
 	federal := roundBpsHalfUp(vat, acfg.FederalShareBPS)
 	stateShare := roundBpsHalfUp(vat, acfg.StateShareBPS)
+	// B3 #2: LGA share = rounding remainder so the three statutory legs
+	// (federal/state/LGA) ALWAYS sum to the full vat_kobo.
+	lgaShare := vat - federal - stateShare
 	switch acfg.Mode {
 	case "federal":
 		res.FederalKobo = vat
 		res.StateKobo = 0
-		res.ShadowFederal, res.ShadowState = federal, stateShare
+		res.LGAKobo = 0
+		res.ShadowFederal, res.ShadowState, res.ShadowLGA = federal, stateShare, lgaShare
 	case "dual_shadow":
 		// primary = state mode; shadow mirrors federal pool view
 		res.FederalKobo = federal
 		res.StateKobo = stateShare
-		res.ShadowFederal, res.ShadowState = vat, 0
+		res.LGAKobo = lgaShare
+		res.ShadowFederal, res.ShadowState, res.ShadowLGA = vat, 0, 0
 	default: // state
 		res.FederalKobo = federal
 		res.StateKobo = stateShare
+		res.LGAKobo = lgaShare
 	}
 	return res
 }
@@ -237,39 +243,71 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 		writeProblem(w, 422, "validation failed", "period is required (YYYY-MM)")
 		return
 	}
-	var vat, federal, state int64
+	// B3 #2: only receipts NOT yet remitted (SettledIn == "") are summed.
+	// Receipts ingested after their period settled are picked up here as a
+	// supplemental carry-over settlement — never silently dropped.
+	var vat, federal, state, lga int64
 	var count int
+	var unsettledIDs []string
+	var totalCount int
 	for _, rc := range s.store.ListReceipts(req.TenantID, "", 0) {
 		if strings.HasPrefix(rc.CapturedAt, req.Period) {
+			totalCount++
+			if rc.SettledIn != "" {
+				continue
+			}
 			vat += rc.VATKobo
 			federal += rc.Attribution.FederalKobo
 			state += rc.Attribution.StateKobo
+			lgaKobo := rc.Attribution.LGAKobo
+			if lgaKobo == 0 && rc.Attribution.Mode != "federal" {
+				// legacy attribution without an LGA leg: conserve by remainder
+				lgaKobo = rc.VATKobo - rc.Attribution.FederalKobo - rc.Attribution.StateKobo
+			}
+			lga += lgaKobo
 			count++
+			unsettledIDs = append(unsettledIDs, rc.ID)
 		}
 	}
-	if count == 0 {
+	if totalCount == 0 {
 		writeProblem(w, 404, "no receipts", "no receipts in period "+req.Period)
 		return
 	}
 	// F5: settled_periods marker checked BEFORE any ledger posting —
-	// re-settling an already-settled (tenant, period) is a 200 no-op replay.
+	// re-settling an already-settled (tenant, period) with NO late receipts
+	// is a 200 no-op replay.
 	if sp := s.store.GetSettledPeriod(req.TenantID, req.Period); sp != nil && sp.Status == "settled" {
-		for _, rc := range s.store.Recons() {
-			if rc.ID == sp.ReconID {
-				writeJSON(w, 200, map[string]any{"recon": rc, "idempotent_replay": true})
-				return
+		if count == 0 {
+			for _, rc := range s.store.Recons() {
+				if rc.ID == sp.ReconID {
+					writeJSON(w, 200, map[string]any{"recon": rc, "idempotent_replay": true})
+					return
+				}
 			}
+			writeJSON(w, 200, map[string]any{"settled_period": sp, "idempotent_replay": true})
+			return
 		}
-		writeJSON(w, 200, map[string]any{"settled_period": sp, "idempotent_replay": true})
-		return
+		// Late receipts in an already-settled period: fall through to a
+		// supplemental carry-over settlement for the unsettled delta.
 	}
-	reconID := DeterministicTransferID("posv-recon:" + req.TenantID + ":" + req.Period)[:16]
+	supp := 0
+	if sp := s.store.GetSettledPeriod(req.TenantID, req.Period); sp != nil && sp.Status == "settled" {
+		// settled marker + late receipts → supplemental settlement number
+		supp = sp.Supplements + 1
+	} // pending/failed marker: resume the initial settlement (supp stays 0)
+	reconID := DeterministicTransferID(fmt.Sprintf("posv-recon:%s:%s:%d", req.TenantID, req.Period, supp))[:16]
 	rec := &ReconRecord{ID: reconID, Period: req.Period, TenantID: req.TenantID, Receipts: count,
-		VATKobo: vat, FederalKobo: federal, StateKobo: state, LedgerMode: s.ledger.Mode(), PostedAt: nowRFC3339()}
+		VATKobo: vat, FederalKobo: federal, StateKobo: state, LGAKobo: lga, Supplement: supp,
+		LedgerMode: s.ledger.Mode(), PostedAt: nowRFC3339()}
 	merchant := accountID(LedgerVATRemittance, NSVATMerchant)
 	s.ledger.CreateAccounts([]LedgerAccount{{ID: merchant, Ledger: LedgerVATRemittance, Code: 4}})
-	if err := s.settlePeriod(req.TenantID, req.Period, merchant, federal, state, reconID); err != nil {
+	if err := s.settlePeriod(req.TenantID, req.Period, merchant, federal, state, lga, reconID, supp); err != nil {
 		writeProblem(w, 502, "settlement saga failed", err.Error())
+		return
+	}
+	// Remitted: durably stamp the receipts so no later run double-settles.
+	if err := s.store.MarkReceiptsSettled(unsettledIDs, req.TenantID, req.Period); err != nil {
+		writeProblem(w, 502, "settlement marker failed", err.Error())
 		return
 	}
 	sp := s.store.GetSettledPeriod(req.TenantID, req.Period)
@@ -279,6 +317,9 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 	}
 	if sp.StatePendingID != "" {
 		posted = append(posted, sp.StatePendingID)
+	}
+	if sp.LGAPendingID != "" {
+		posted = append(posted, sp.LGAPendingID)
 	}
 	rec.LedgerTransfer = strings.Join(posted, ",")
 	s.store.AddRecon(rec)
@@ -297,17 +338,38 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 //
 // A crash at any point leaves a marker the next run resumes from actual
 // ledger state (GetTransfer per leg).
-func (s *Service) settlePeriod(tenant, period, merchant string, federal, state int64, reconID string) error {
-	fedPend := DeterministicTransferID("posv-pend:" + tenant + ":" + period + ":federal")
-	statePend := DeterministicTransferID("posv-pend:" + tenant + ":" + period + ":state")
+func (s *Service) settlePeriod(tenant, period, merchant string, federal, state, lga int64, reconID string, supp int) error {
+	suffix := ""
+	if supp > 0 {
+		suffix = fmt.Sprintf(":supp:%d", supp)
+	}
+	fedPend := DeterministicTransferID("posv-pend:"+tenant+":"+period+":federal" + suffix)
+	statePend := DeterministicTransferID("posv-pend:"+tenant+":"+period+":state" + suffix)
+	lgaPend := DeterministicTransferID("posv-pend:"+tenant+":"+period+":lga" + suffix)
 	sp := s.store.GetSettledPeriod(tenant, period)
 	if sp == nil {
-		sp = &SettledPeriod{TenantID: tenant, Period: period, FederalKobo: federal, StateKobo: state,
-			FederalPendingID: fedPend, StatePendingID: statePend, Status: "pending",
-			ReconID: reconID, UpdatedAt: nowRFC3339()}
-		if err := s.store.SaveSettledPeriod(sp); err != nil {
-			return fmt.Errorf("persist settlement marker: %w", err)
-		}
+		sp = &SettledPeriod{TenantID: tenant, Period: period, Status: "pending", UpdatedAt: nowRFC3339()}
+	}
+	if supp == 0 {
+		// initial settlement (or a crashed one being resumed): reset the
+		// marker to this attempt's ids and amounts.
+		sp.FederalKobo, sp.StateKobo, sp.LGAKobo = federal, state, lga
+		sp.FederalPendingID, sp.StatePendingID, sp.LGAPendingID = fedPend, statePend, lgaPend
+		sp.ReconID = reconID
+	} else {
+		// supplemental carry-over: accumulate amounts, point ids at the
+		// supplemental transfers for resume/recon.
+		sp.FederalKobo += federal
+		sp.StateKobo += state
+		sp.LGAKobo += lga
+		sp.FederalPendingID, sp.StatePendingID, sp.LGAPendingID = fedPend, statePend, lgaPend
+		sp.ReconID = reconID
+	}
+	sp.Supplements = supp
+	sp.Status = "pending"
+	sp.UpdatedAt = nowRFC3339()
+	if err := s.store.SaveSettledPeriod(sp); err != nil {
+		return fmt.Errorf("persist settlement marker: %w", err)
 	}
 	legs := []struct {
 		name    string
@@ -315,8 +377,9 @@ func (s *Service) settlePeriod(tenant, period, merchant string, federal, state i
 		amount  int64
 		account string
 	}{
-		{"federal", sp.FederalPendingID, sp.FederalKobo, accountID(LedgerVATRemittance, NSVATFederalPool)},
-		{"state", sp.StatePendingID, sp.StateKobo, accountID(LedgerVATRemittance, NSVATStatePool)},
+		{"federal", sp.FederalPendingID, federal, accountID(LedgerVATRemittance, NSVATFederalPool)},
+		{"state", sp.StatePendingID, state, accountID(LedgerVATRemittance, NSVATStatePool)},
+		{"lga", sp.LGAPendingID, lga, accountID(LedgerVATRemittance, NSVATLGAPool)},
 	}
 	postedLegs := map[string]bool{}
 	for _, leg := range legs {
@@ -337,21 +400,38 @@ func (s *Service) settlePeriod(tenant, period, merchant string, federal, state i
 			// exists from a crashed attempt: fall through to post
 		}
 		if _, err := s.ledger.PostPending(leg.pendID, leg.amount); err != nil {
-			// compensation: void this leg (if still pending) and reverse any
-			// leg already posted — the pair never splits.
-			_ = s.ledger.VoidPending(leg.pendID)
-			for _, other := range legs {
-				if postedLegs[other.name] {
-					_, _ = s.ledger.Transfer(LedgerTransfer{
-						ID:             DeterministicTransferID("posv-rev:" + tenant + ":" + period + ":" + other.name),
-						DebitAccountID: other.account, CreditAccountID: merchant,
-						AmountKobo: other.amount, Ledger: LedgerVATRemittance, Code: 3})
+			// R3 verifier (pos-vat #40): compensation must NEVER void a
+			// deterministic pending id that is still pending — a voided
+			// deterministic id is neither re-creatable ("id exists with
+			// different state") nor postable ("not postable"), which
+			// permanently bricked crash-resume for the period. A
+			// still-pending leg is left untouched so the next settle
+			// attempt looks it up by deterministic id and posts it.
+			resumable := false
+			if ts, gerr := s.ledger.GetTransfer(leg.pendID); gerr == nil &&
+				ts.Pending && !ts.Posted && !ts.Voided {
+				resumable = true
+			}
+			if !resumable {
+				// the failed leg can no longer be resumed (voided
+				// externally / unknown) — only then compensate: reverse
+				// any leg already posted so the pair never splits.
+				for _, other := range legs {
+					if postedLegs[other.name] {
+						_, _ = s.ledger.Transfer(LedgerTransfer{
+							ID:             DeterministicTransferID("posv-rev:" + tenant + ":" + period + ":" + other.name),
+							DebitAccountID: other.account, CreditAccountID: merchant,
+							AmountKobo: other.amount, Ledger: LedgerVATRemittance, Code: 3})
+					}
 				}
 			}
 			sp.Status = "failed"
 			sp.FailReason = fmt.Sprintf("%s post: %v", leg.name, err)
 			sp.UpdatedAt = nowRFC3339()
 			_ = s.store.SaveSettledPeriod(sp)
+			if resumable {
+				return fmt.Errorf("%s post: %w (pending leg left in place for resume)", leg.name, err)
+			}
 			return fmt.Errorf("%s post: %w (compensation applied)", leg.name, err)
 		}
 		postedLegs[leg.name] = true
