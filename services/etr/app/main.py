@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from .engine import compute as engine_compute
+from .gates import qdmtt_upgrade_armed
 from .gir import build_filing_pack, build_gir_xml
 from .models import ComputeRequest, ConstituentEntity, Group
 from .packs import PackSet, load_packset
@@ -205,7 +206,11 @@ async def run_compute(req: ComputeRequest, _: dict = Depends(auth)):
     entities = ctx.store.entities(req.group_id)
     if not entities:
         raise HTTPException(422, f"group {req.group_id} has no constituent entities")
-    comp = engine_compute(ctx.packs, group, entities, req)
+    # Audit fix B2-#10: QDMTT path is gated SERVER-SIDE by the reg-watch
+    # qdmtt_upgrade gate; the client-supplied req.qdmtt_upgrade field is
+    # ignored (fail-closed to the IIR residual top-up path).
+    armed, _gate_source = qdmtt_upgrade_armed()
+    comp = engine_compute(ctx.packs, group, entities, req, qdmtt_armed=armed)
     ctx.store.put_computation(comp)
     return comp.model_dump()
 

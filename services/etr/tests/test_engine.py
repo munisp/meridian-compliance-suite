@@ -73,18 +73,35 @@ def test_etr_and_topup_mu():
     assert mu.topup_kobo == excess * 500 // 10000
 
 
-def test_qdmtt_upgrade_flag():
-    ps = make_packset()
-    # NG UPE: income 500m*100, taxes 150m*100 -> 30% ETR, no top-up anyway.
-    # Force NG low-tax by using a single low-tax NG entity:
-    ents = [ConstituentEntity(id="ng-low", group_id="grp-1", name="NG LowTax", jurisdiction="NG",
+def _lowtax_ng() -> list[ConstituentEntity]:
+    return [ConstituentEntity(id="ng-low", group_id="grp-1", name="NG LowTax", jurisdiction="NG",
                               net_income_kobo=1_000_000_000_00, covered_taxes_kobo=50_000_000_00)]
-    comp_off = compute(ps, make_group(), ents, ComputeRequest(group_id="grp-1", fiscal_year=2025, qdmtt_upgrade=False))
-    ng = comp_off.jurisdictions[0]
-    assert ng.topup_kobo > 0 and not ng.qdmtt_applied and ng.residual_topup_kobo == ng.topup_kobo
-    comp_on = compute(ps, make_group(), ents, ComputeRequest(group_id="grp-1", fiscal_year=2025, qdmtt_upgrade=True))
-    ng2 = comp_on.jurisdictions[0]
-    assert ng2.qdmtt_applied and ng2.qdmtt_kobo == ng2.topup_kobo and ng2.residual_topup_kobo == 0
+
+
+def test_qdmtt_server_gate_closed_ignores_client_flag():
+    """Audit fix B2-#10: client-supplied qdmtt_upgrade=True must NOT activate
+    the QDMTT path when the server-resolved reg-watch gate is disarmed."""
+    ps = make_packset()
+    comp = compute(ps, make_group(), _lowtax_ng(),
+                   ComputeRequest(group_id="grp-1", fiscal_year=2025, qdmtt_upgrade=True),
+                   qdmtt_armed=False)
+    ng = comp.jurisdictions[0]
+    assert ng.topup_kobo > 0
+    assert not ng.qdmtt_applied, "client flag must not enable QDMTT"
+    assert ng.residual_topup_kobo == ng.topup_kobo
+    assert comp.qdmtt_upgrade is False
+
+
+def test_qdmtt_server_gate_armed_applies():
+    """When the server gate is armed, QDMTT applies even if the client field
+    is False (server decides, not the client)."""
+    ps = make_packset()
+    comp = compute(ps, make_group(), _lowtax_ng(),
+                   ComputeRequest(group_id="grp-1", fiscal_year=2025, qdmtt_upgrade=False),
+                   qdmtt_armed=True)
+    ng = comp.jurisdictions[0]
+    assert ng.qdmtt_applied and ng.qdmtt_kobo == ng.topup_kobo and ng.residual_topup_kobo == 0
+    assert comp.qdmtt_upgrade is True
 
 
 def test_iir_allocation_upe_and_pope():

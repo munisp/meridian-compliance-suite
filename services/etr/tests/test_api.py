@@ -88,3 +88,43 @@ def test_workflows():
     assert r3.status_code == 200 and "gir_xml" in r3.json()
     r4 = client.post("/v1/workflows/wf-nope/run", json={}, headers=H)
     assert r4.status_code == 404
+
+
+def _seed_lowtax_ng(gid: str):
+    client.post("/v1/etr/groups", json={
+        "id": gid, "name": "Gate Test MNE", "consolidated_revenue_kobo": 20_000_000_000_000_000},
+        headers=H)
+    client.post("/v1/etr/entities", json=[
+        {"id": f"{gid}-e", "group_id": gid, "name": "NG LowTax", "jurisdiction": "NG",
+         "net_income_kobo": 1_000_000_000_00, "covered_taxes_kobo": 50_000_000_00},
+    ], headers=H)
+
+
+def test_compute_ignores_client_qdmtt_flag_gate_closed(monkeypatch):
+    """B2-#10: client qdmtt_upgrade=True + server gate disarmed -> no QDMTT."""
+    import app.main as m
+    monkeypatch.setattr(m, "qdmtt_upgrade_armed", lambda: (False, "default"))
+    _seed_lowtax_ng("g-gate-off")
+    r = client.post("/v1/etr/compute",
+                    json={"group_id": "g-gate-off", "fiscal_year": 2025, "qdmtt_upgrade": True},
+                    headers=H)
+    assert r.status_code == 201, r.text
+    comp = r.json()
+    ng = comp["jurisdictions"][0]
+    assert ng["topup_kobo"] > 0
+    assert ng["qdmtt_applied"] is False and ng["residual_topup_kobo"] == ng["topup_kobo"]
+    assert comp["qdmtt_upgrade"] is False
+
+
+def test_compute_server_gate_armed_applies_qdmtt(monkeypatch):
+    """B2-#10: server gate armed -> QDMTT even when client field is False."""
+    import app.main as m
+    monkeypatch.setattr(m, "qdmtt_upgrade_armed", lambda: (True, "reg-watch"))
+    _seed_lowtax_ng("g-gate-on")
+    r = client.post("/v1/etr/compute",
+                    json={"group_id": "g-gate-on", "fiscal_year": 2025, "qdmtt_upgrade": False},
+                    headers=H)
+    assert r.status_code == 201, r.text
+    ng = r.json()["jurisdictions"][0]
+    assert ng["qdmtt_applied"] is True and ng["qdmtt_kobo"] == ng["topup_kobo"]
+    assert ng["residual_topup_kobo"] == 0
