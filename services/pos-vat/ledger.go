@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -101,6 +102,7 @@ func (h *HTTPLedger) do(method, path string, body any, out any) error {
 	}
 	req, _ := http.NewRequest(method, h.Base+path, rdr)
 	req.Header.Set("Content-Type", "application/json")
+	setServiceAuthHeaders(req, "pos-vat")
 	cli := &http.Client{Timeout: 3 * time.Second}
 	resp, err := cli.Do(req)
 	if err != nil {
@@ -115,6 +117,23 @@ func (h *HTTPLedger) do(method, path string, body any, out any) error {
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
+}
+
+// setServiceAuthHeaders applies the B3 #5 service-to-service auth contract
+// shared with the core ledger: the env-injected shared service token
+// (MERIDIAN_SERVICE_TOKEN / LEDGER_SERVICE_TOKEN) is sent as
+// X-Service-Token and validated fail-closed server-side; the forgeable
+// X-Dev-Role header is sent only as the dev fallback when no token is
+// configured.
+func setServiceAuthHeaders(req *http.Request, serviceName string) {
+	req.Header.Set("X-Service-Name", serviceName)
+	if tok := os.Getenv("MERIDIAN_SERVICE_TOKEN"); tok != "" {
+		req.Header.Set("X-Service-Token", tok)
+	} else if tok := os.Getenv("LEDGER_SERVICE_TOKEN"); tok != "" {
+		req.Header.Set("X-Service-Token", tok)
+	} else {
+		req.Header.Set("X-Dev-Role", "operator") // dev only
+	}
 }
 
 func (h *HTTPLedger) CreateAccounts(accts []LedgerAccount) error {
