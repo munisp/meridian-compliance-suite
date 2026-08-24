@@ -48,7 +48,7 @@ def test_keycloak_no_hs256_dev_secret_downgrade(monkeypatch):
 
 def test_dev_hs256_still_works(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "dev")
-    monkeypatch.delenv("PROFILE", raising=False)
+    monkeypatch.setenv("PROFILE", "dev")  # B2 #17: dev fallback is dev-only
     _hide_meridian_py(monkeypatch)
     tok = jwt.encode({"sub": "dev-user", "roles": ["admin"]},
                      DEV_SECRET, algorithm="HS256")
