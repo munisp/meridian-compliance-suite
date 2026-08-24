@@ -177,6 +177,9 @@ func (s *Service) auth(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			r.Header.Set("X-Subject", "user:"+claims.Sub)
+			if len(claims.Roles) > 0 { // B2 #3: role from the verified JWT, not a header
+				r.Header.Set("X-Role", claims.Roles[0])
+			}
 			next(w, r)
 			return
 		}

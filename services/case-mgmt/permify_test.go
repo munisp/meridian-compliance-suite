@@ -287,6 +287,11 @@ func TestRelGrantRevokeHandlersLive(t *testing.T) {
 
 	post := func(path string, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", path, strings.NewReader(body))
+		// B2 #3: grant/revoke are admin-only; the svc.auth middleware
+		// normally stamps X-Role from the verified JWT — set it directly
+		// here as the middleware is not wired into this handler-level test.
+		req.Header.Set("X-Role", "admin")
+		req.Header.Set("X-Subject", "user:test-admin")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec
