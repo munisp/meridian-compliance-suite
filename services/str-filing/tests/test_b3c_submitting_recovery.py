@@ -21,6 +21,10 @@ client = TestClient(app)
 
 TENANT = "t-bank-1"
 
+# Merge fallout fix: #39 (B2 #2) made every STR route authenticated; these
+# tests predate it. Dev-profile officer headers per test_zz_str_authz.py.
+OFFICER = {"X-Dev-Role": "compliance-officer", "X-Tenant-Id": TENANT}
+
 
 def _create(key: str) -> dict:
     resp = client.post("/v1/str", json={
@@ -28,7 +32,7 @@ def _create(key: str) -> dict:
         "subject_ref": "cust-001", "report_type": "STR",
         "payload": {"amount": 9500000, "currency": "NGN",
                     "trigger": "pep_edd", "case_id": "kyc-" + key},
-        "actor": "kyc-engine"})
+        "actor": "kyc-engine"}, headers=OFFICER)
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -53,14 +57,14 @@ def test_b3c_01_stuck_submitting_recovered_and_filed_exactly_once():
 
     # the sweep resumes the stranded row exactly once
     assert worker.recover_submitting() == 1
-    resp = client.get(f"/v1/str/{rec['id']}")
+    resp = client.get(f"/v1/str/{rec['id']}", headers=OFFICER)
     assert resp.json()["status"] == "failed"
     # a second sweep is a no-op (the row left `submitting`)
     assert worker.recover_submitting() == 0
 
     # the normal retry path now files it — exactly one NFIU submission
     assert worker.process_due() == 1
-    body = client.get(f"/v1/str/{rec['id']}").json()
+    body = client.get(f"/v1/str/{rec['id']}", headers=OFFICER).json()
     assert body["status"] == "filed"
     assert body["nfiu_reference"].startswith("SIM-NFIU-REF-")
     subs = [s for s in _sim().submissions if s["str_id"] == rec["id"]]
@@ -72,12 +76,12 @@ def test_b3c_02_recent_submitting_not_swept_grace_window():
     rec = _create("b3c-stuck-2")
     _force_submitting(rec["id"], age_seconds=5)  # in-flight submit
     assert worker.recover_submitting() == 0
-    body = client.get(f"/v1/str/{rec['id']}").json()
+    body = client.get(f"/v1/str/{rec['id']}", headers=OFFICER).json()
     assert body["status"] == "submitting"  # untouched within grace
     # explicit zero grace (operator-forced) does recover it
     assert worker.recover_submitting(grace_seconds=0) == 1
     assert worker.process_due() == 1
-    assert client.get(f"/v1/str/{rec['id']}").json()["status"] == "filed"
+    assert client.get(f"/v1/str/{rec['id']}", headers=OFFICER).json()["status"] == "filed"
 
 
 def test_b3c_03_crash_mid_submit_then_outage_retries_no_double_file():
@@ -91,7 +95,7 @@ def test_b3c_03_crash_mid_submit_then_outage_retries_no_double_file():
     try:
         assert worker.recover_submitting() == 1
         assert worker.process_due() == 1  # retry fails -> failed w/ backoff
-        assert client.get(f"/v1/str/{rec['id']}").json()["status"] == "failed"
+        assert client.get(f"/v1/str/{rec['id']}", headers=OFFICER).json()["status"] == "failed"
     finally:
         _sim().available = True
     # STR_RETRY_BASE_SECONDS=0 in tests: retry immediately due
@@ -100,7 +104,7 @@ def test_b3c_03_crash_mid_submit_then_outage_retries_no_double_file():
         r.next_retry_at = db.utcnow()
         s.commit()
     assert worker.process_due() == 1
-    body = client.get(f"/v1/str/{rec['id']}").json()
+    body = client.get(f"/v1/str/{rec['id']}", headers=OFFICER).json()
     assert body["status"] == "filed"
     subs = [s for s in _sim().submissions if s["str_id"] == rec["id"]]
     assert all(s["idempotency_key"] == "b3c-stuck-3" for s in subs)
