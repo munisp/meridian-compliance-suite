@@ -400,21 +400,38 @@ func (s *Service) settlePeriod(tenant, period, merchant string, federal, state, 
 			// exists from a crashed attempt: fall through to post
 		}
 		if _, err := s.ledger.PostPending(leg.pendID, leg.amount); err != nil {
-			// compensation: void this leg (if still pending) and reverse any
-			// leg already posted — the pair never splits.
-			_ = s.ledger.VoidPending(leg.pendID)
-			for _, other := range legs {
-				if postedLegs[other.name] {
-					_, _ = s.ledger.Transfer(LedgerTransfer{
-						ID:             DeterministicTransferID("posv-rev:" + tenant + ":" + period + ":" + other.name),
-						DebitAccountID: other.account, CreditAccountID: merchant,
-						AmountKobo: other.amount, Ledger: LedgerVATRemittance, Code: 3})
+			// R3 verifier (pos-vat #40): compensation must NEVER void a
+			// deterministic pending id that is still pending — a voided
+			// deterministic id is neither re-creatable ("id exists with
+			// different state") nor postable ("not postable"), which
+			// permanently bricked crash-resume for the period. A
+			// still-pending leg is left untouched so the next settle
+			// attempt looks it up by deterministic id and posts it.
+			resumable := false
+			if ts, gerr := s.ledger.GetTransfer(leg.pendID); gerr == nil &&
+				ts.Pending && !ts.Posted && !ts.Voided {
+				resumable = true
+			}
+			if !resumable {
+				// the failed leg can no longer be resumed (voided
+				// externally / unknown) — only then compensate: reverse
+				// any leg already posted so the pair never splits.
+				for _, other := range legs {
+					if postedLegs[other.name] {
+						_, _ = s.ledger.Transfer(LedgerTransfer{
+							ID:             DeterministicTransferID("posv-rev:" + tenant + ":" + period + ":" + other.name),
+							DebitAccountID: other.account, CreditAccountID: merchant,
+							AmountKobo: other.amount, Ledger: LedgerVATRemittance, Code: 3})
+					}
 				}
 			}
 			sp.Status = "failed"
 			sp.FailReason = fmt.Sprintf("%s post: %v", leg.name, err)
 			sp.UpdatedAt = nowRFC3339()
 			_ = s.store.SaveSettledPeriod(sp)
+			if resumable {
+				return fmt.Errorf("%s post: %w (pending leg left in place for resume)", leg.name, err)
+			}
 			return fmt.Errorf("%s post: %w (compensation applied)", leg.name, err)
 		}
 		postedLegs[leg.name] = true
