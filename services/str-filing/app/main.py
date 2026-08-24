@@ -175,28 +175,52 @@ def intake_event(event: dict, *, actor: str) -> tuple[dict, bool]:
 
 @app.post("/v1/str", status_code=201)
 def create_str(body: STRIn, request: Request):
-    rec, created = intake_event(body.model_dump(),
-                                actor=request.headers.get("X-Actor", ""))
+    """Manual STR intake. B2 #2: requires authentication + a write role;
+    the audit actor is ALWAYS the verified JWT principal (never the
+    client-controlled X-Actor header or request body), and the tenant is
+    scoped to the caller's tenant."""
+    decision = authz.authorize_str_access(request, write=True,
+                                          tenant_id=body.tenant_id)
+    if isinstance(decision, JSONResponse):
+        return decision
+    event = body.model_dump()
+    event["actor"] = ""  # strip any client-supplied actor
+    event["tenant_id"] = decision.get("tenant_id") or body.tenant_id
+    rec, created = intake_event(event, actor=decision["sub"])
     return JSONResponse(status_code=201 if created else 200, content=rec)
 
 
 @app.get("/v1/str/{str_id}")
-def get_str(str_id: str):
+def get_str(str_id: str, request: Request):
+    decision = authz.authorize_str_access(request)
+    if isinstance(decision, JSONResponse):
+        return decision
     with sessions() as s:
         rec = s.get(db.STRFiling, str_id)
         if rec is None:
             return authz.problem(404, "not found", str_id)
+        ptenant = decision.get("tenant_id", "")
+        if ptenant and rec.tenant_id != ptenant:
+            return authz.problem(403, "forbidden",
+                                 "str outside caller tenant scope")
         return rec.to_dict()
 
 
 @app.get("/v1/str")
-def list_str(status: str = "", tenant_id: str = ""):
+def list_str(request: Request, status: str = "", tenant_id: str = ""):
+    """List STRs. B2 #2: authenticated callers only, and the result is
+    scoped to the caller's tenant — a cross-tenant tenant_id filter is
+    refused, never silently honoured."""
+    decision = authz.authorize_str_access(request, tenant_id=tenant_id)
+    if isinstance(decision, JSONResponse):
+        return decision
+    scope = decision.get("tenant_id") or tenant_id
     with sessions() as s:
         q = s.query(db.STRFiling)
         if status:
             q = q.filter(db.STRFiling.status == status)
-        if tenant_id:
-            q = q.filter(db.STRFiling.tenant_id == tenant_id)
+        if scope:
+            q = q.filter(db.STRFiling.tenant_id == scope)
         return [r.to_dict() for r in
                 q.order_by(db.STRFiling.created_at).limit(500).all()]
 

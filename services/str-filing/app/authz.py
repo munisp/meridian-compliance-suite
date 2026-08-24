@@ -30,6 +30,14 @@ def _prod() -> bool:
             or os.environ.get("AUTH_MODE", "").lower() in ("keycloak", "prod"))
 
 
+def _dev() -> bool:
+    """B2 #17: dev fallbacks (X-Dev-Role principal, HS256 default dev
+    secret) are honoured ONLY on an explicit dev profile. Anything else
+    (prod, keycloak, or an unset/ambiguous PROFILE) fails closed."""
+    return (os.environ.get("PROFILE", "").lower() == "dev"
+            and not _keycloak_mode())
+
+
 def _keycloak_mode() -> bool:
     return os.environ.get("AUTH_MODE", "").lower() in ("keycloak", "prod")
 
@@ -134,10 +142,20 @@ def _principal(request: Request) -> dict:
             from meridian_py import dev_jwt  # platform shared auth package
             return dev_jwt.verify_token(token)
         except ImportError:
-            # dev profile only: HS256 with the dev secret
+            # B2 #17: HS256 local verification is a dev-only fallback.
+            # The well-known default secret is accepted ONLY under an
+            # explicit PROFILE=dev; otherwise MERIDIAN_DEV_JWT_SECRET must
+            # be set explicitly (and still never in keycloak/prod mode,
+            # which is handled above).
             import jwt
-            secret = os.environ.get("MERIDIAN_DEV_JWT_SECRET",
-                                    "meridian-dev-secret-change-me-32!")
+            secret = os.environ.get("MERIDIAN_DEV_JWT_SECRET", "")
+            if not secret:
+                if not _dev():
+                    log.warning("component=authz token presented but no "
+                                "MERIDIAN_DEV_JWT_SECRET and PROFILE!=dev; "
+                                "denying (fail-closed)")
+                    return {}
+                secret = "meridian-dev-secret-change-me-32!"
             try:
                 return jwt.decode(token, secret, algorithms=["HS256"])
             except jwt.PyJWTError:
@@ -145,10 +163,44 @@ def _principal(request: Request) -> dict:
         except Exception:
             return {}
     role = request.headers.get("X-Dev-Role", "")
-    if role and not _prod():
+    if role and _dev():  # B2 #17: dev-role header is dev-profile only
         return {"sub": f"dev-{role}", "roles": [role],
                 "tenant_id": request.headers.get("X-Tenant-Id", "")}
     return {}
+
+
+def authenticate(request: Request) -> dict | JSONResponse:
+    """Require a verified principal. Returns the principal dict or an
+    RFC7807 401 problem."""
+    principal = _principal(request)
+    if not principal.get("sub"):
+        return problem(401, "unauthorized", "authentication required")
+    return principal
+
+
+# B2 #2: STR create/read/list authorization. Reads are allowed for the
+# compliance read roles; writes (manual STR intake) only for officers/admins.
+# The caller's tenant (from the verified principal) scopes every operation.
+STR_READ_ROLES = ("admin", "compliance-officer", "auditor")
+STR_WRITE_ROLES = ("admin", "compliance-officer")
+
+
+def authorize_str_access(request: Request, *, write: bool = False,
+                         tenant_id: str = "") -> dict | JSONResponse:
+    """Gate STR routes. Returns the principal dict, or an RFC7807 problem
+    response when denied. ``tenant_id`` is the tenant the caller is trying
+    to touch; when the principal carries a tenant it must match."""
+    principal = authenticate(request)
+    if isinstance(principal, JSONResponse):
+        return principal
+    need = STR_WRITE_ROLES if write else STR_READ_ROLES
+    if not set(need) & set(principal.get("roles", [])):
+        return problem(403, "forbidden", f"requires one of {sorted(need)}")
+    ptenant = principal.get("tenant_id", "")
+    if ptenant and tenant_id and tenant_id != ptenant:
+        return problem(403, "forbidden",
+                       f"tenant {tenant_id!r} outside caller scope")
+    return principal
 
 
 def problem(status: int, title: str, detail: str = "") -> JSONResponse:
