@@ -155,6 +155,18 @@ func orDef(s, d string) string {
 
 func (s *Service) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// B2 #3 (verifier R3): identity headers are server-derived ONLY.
+		// Unconditionally strip any inbound identity headers (X-Role,
+		// X-Subject, X-Meridian-*) BEFORE auth resolution, so a forged
+		// header can never survive into handlers — regardless of whether
+		// the verified JWT carries a roles claim or not.
+		r.Header.Del("X-Role")
+		r.Header.Del("X-Subject")
+		for k := range r.Header {
+			if strings.HasPrefix(strings.ToLower(k), "x-meridian-") {
+				r.Header.Del(k)
+			}
+		}
 		h := r.Header.Get("Authorization")
 		if strings.HasPrefix(h, "Bearer ") {
 			tok := strings.TrimPrefix(h, "Bearer ")
