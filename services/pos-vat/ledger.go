@@ -61,6 +61,7 @@ const (
 	NSVATFederalPool    = 1
 	NSVATStatePool      = 2
 	NSVATMerchant       = 3
+	NSVATLGAPool        = 4 // B3 #2: LGA 35% share pool
 )
 
 type LedgerAccount struct {
@@ -202,6 +203,7 @@ func NewDevLedger() *DevLedger {
 	dl.CreateAccounts([]LedgerAccount{
 		{ID: accountID(LedgerVATRemittance, NSVATFederalPool), Ledger: LedgerVATRemittance, Code: 5},
 		{ID: accountID(LedgerVATRemittance, NSVATStatePool), Ledger: LedgerVATRemittance, Code: 5},
+		{ID: accountID(LedgerVATRemittance, NSVATLGAPool), Ledger: LedgerVATRemittance, Code: 5},
 	})
 	return dl
 }

@@ -52,20 +52,29 @@ type Receipt struct {
 	LGA             string            `json:"lga"`
 	Attribution     AttributionResult `json:"attribution"`
 	Status          string            `json:"status"` // ingested|spooled|settled
+	// SettledIn records the (tenant, period) settlement marker this receipt
+	// was remitted under (B3 #2): receipts ingested after their period
+	// settled stay unsettled until a supplemental settlement remits them.
+	SettledIn       string            `json:"settled_in,omitempty"`
 	RulePackVersion string            `json:"rule_pack_version"`
 	// Citations: LCE SPEC §5 statute citations per computed VAT amount
 	// (additive response-layer field; empty when no VAT-bearing basket).
 	Citations []rulepack.Citation `json:"citations,omitempty"`
 }
 
-// AttributionResult holds federal/state attribution (+ dual_shadow pair).
+// AttributionResult holds federal/state/LGA attribution (+ dual_shadow pair).
+// B3 #2: FederalKobo+StateKobo+LGAKobo always sums to the full vat_kobo
+// (LGA receives the rounding remainder) — no share is ever dropped.
 type AttributionResult struct {
 	Mode          string `json:"mode"` // federal|state|dual_shadow
 	FederalKobo   int64  `json:"federal_kobo"`
 	StateKobo     int64  `json:"state_kobo"`
+	LGAKobo       int64  `json:"lga_kobo"`
 	State         string `json:"state,omitempty"`
+	LGA           string `json:"lga,omitempty"`
 	ShadowFederal int64  `json:"shadow_federal_kobo,omitempty"` // dual_shadow mirror
 	ShadowState   int64  `json:"shadow_state_kobo,omitempty"`
+	ShadowLGA     int64  `json:"shadow_lga_kobo,omitempty"`
 }
 
 // Envelope per SPEC §1.1.
