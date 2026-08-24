@@ -36,16 +36,28 @@ def _mode() -> str:
 
 
 def _keycloak_configured() -> bool:
-    return bool(os.environ.get("KEYCLOAK_ISSUER"))
+    return bool(os.environ.get("KEYCLOAK_ISSUER")
+                or os.environ.get("KEYCLOAK_JWKS_URL"))
+
+
+def _profile_prod() -> bool:
+    """PROFILE=prod means production regardless of AUTH_MODE (R3 verifier
+    hole in filings #41: PROFILE=prod + AUTH_MODE unset silently resolved
+    to dev auth and honoured the forgeable X-Dev-Role header)."""
+    return os.environ.get("PROFILE", "").strip().lower() == "prod"
 
 
 def validate_auth_config() -> None:
     """Fail closed at startup: a keycloak/prod deployment missing its OIDC
     issuer configuration must refuse to boot rather than run dev auth."""
+    if _profile_prod() and _mode() != "keycloak":
+        raise RuntimeError(
+            "PROFILE=prod but AUTH_MODE is unset/not keycloak; refusing to "
+            "start (no dev auth in prod)")
     if _mode() == "keycloak" and not _keycloak_configured():
         raise RuntimeError(
-            "AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset; refusing to "
-            "start (no dev fallback)")
+            "AUTH_MODE=keycloak but KEYCLOAK_ISSUER/KEYCLOAK_JWKS_URL is "
+            "unset; refusing to start (no dev fallback)")
 
 
 def issue_token(sub: str, roles: list[str] | None = None,
@@ -70,7 +82,7 @@ _jwks_client = None
 
 def _jwks():
     global _jwks_client
-    issuer = os.environ["KEYCLOAK_ISSUER"].rstrip("/")
+    issuer = os.environ.get("KEYCLOAK_ISSUER", "").rstrip("/")
     jwks_url = (os.environ.get("KEYCLOAK_JWKS_URL")
                 or f"{issuer}/protocol/openid-connect/certs")
     # Rebuild the client when the configured URL changes (env swap in tests).
@@ -83,15 +95,17 @@ def verify_keycloak_token(token: str) -> dict:
     """Verify an RS256 Keycloak token against the realm JWKS; validates
     signature, iss, exp and aud (when KEYCLOAK_AUDIENCE is set) and maps
     realm + client roles into a flat `roles` claim."""
-    issuer = os.environ["KEYCLOAK_ISSUER"].rstrip("/")
+    issuer = os.environ.get("KEYCLOAK_ISSUER", "").rstrip("/")
     audience = os.environ.get("KEYCLOAK_AUDIENCE", "")
     try:
         key = _jwks().get_signing_key_from_jwt(token).key
         payload = jwt.decode(
-            token, key, algorithms=["RS256"], issuer=issuer,
+            token, key, algorithms=["RS256"],
+            issuer=issuer or None,
             audience=audience or None,
             options={"verify_aud": bool(audience),
-                     "require": ["exp", "iss", "sub"]})
+                     "verify_iss": bool(issuer),
+                     "require": ["exp", "sub"]})
     except jwt.PyJWTError as exc:
         raise ValueError(str(exc)) from exc
     roles = list(payload.get("realm_access", {}).get("roles", []))
@@ -133,12 +147,18 @@ async def require_auth(request: Request) -> Principal:
 
     mode = _mode()
     auth = request.headers.get("authorization", "")
+    if _profile_prod() and mode != "keycloak":
+        # fail closed: prod profile with dev-resolved auth mode denies
+        # every request (no X-Dev-Role / dev-HS256 path in prod)
+        raise HTTPException(
+            status_code=401,
+            detail="PROFILE=prod requires AUTH_MODE=keycloak; dev auth refused")
     if mode == "keycloak":
         if not _keycloak_configured():
             # fail closed: misconfigured prod denies every request
             raise HTTPException(
                 status_code=401,
-                detail="AUTH_MODE=keycloak but KEYCLOAK_ISSUER is unset")
+                detail="AUTH_MODE=keycloak but KEYCLOAK_ISSUER/KEYCLOAK_JWKS_URL is unset")
         if auth.startswith("Bearer "):
             try:
                 return Principal(verify_keycloak_token(auth[len("Bearer "):]))

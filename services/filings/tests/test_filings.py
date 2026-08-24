@@ -11,6 +11,10 @@ from app.main import app
 
 client = TestClient(app)
 
+# B2 #1: all routes require auth; operator (officer) covers filing,
+# assessment issue and objection decisions in these functional tests.
+HDRS = {"X-Dev-Role": "operator"}
+
 
 # ---------- util ----------
 def test_kobo_mul_rounds_half_up():
@@ -88,24 +92,24 @@ def test_vat_nil_return_and_schedule_path():
 def test_vat_filing_idempotency_and_amendment():
     body = {"tin": "TIN-API", "period": "2026-03", "idempotency_key": "k1",
             "invoices": INVOICES}
-    r1 = client.post("/v1/filings/vat", json=body)
+    r1 = client.post("/v1/filings/vat", json=body, headers=HDRS)
     assert r1.status_code == 201
-    r2 = client.post("/v1/filings/vat", json=body)
+    r2 = client.post("/v1/filings/vat", json=body, headers=HDRS)
     assert r2.status_code == 200  # idempotent replay
     assert r1.json()["return_id"] == r2.json()["return_id"]
     # new key, same period without amendment flag -> 422
     dup = dict(body, idempotency_key="k2")
-    assert client.post("/v1/filings/vat", json=dup).status_code == 422
+    assert client.post("/v1/filings/vat", json=dup, headers=HDRS).status_code == 422
     # amendment supersedes, same period, version 2
     amd = dict(body, idempotency_key="k3",
                amendment_of=r1.json()["return_id"])
-    r3 = client.post("/v1/filings/vat", json=amd)
+    r3 = client.post("/v1/filings/vat", json=amd, headers=HDRS)
     assert r3.status_code == 201
     assert r3.json()["version"] == 2
     assert r3.json()["amends"] == r1.json()["return_id"]
-    got = client.get("/v1/filings/vat/TIN-API/2026-03")
+    got = client.get("/v1/filings/vat/TIN-API/2026-03", headers=HDRS)
     assert got.json()["version"] == 2
-    assert client.get("/v1/filings/vat/TIN-API/2099-01").status_code == 404
+    assert client.get("/v1/filings/vat/TIN-API/2099-01", headers=HDRS).status_code == 404
 
 
 # ---------- F2 PAYE ----------
@@ -158,12 +162,12 @@ def test_paye_h1_annual_aggregation():
     # API path
     r = client.post("/v1/filings/paye", json={
         "employer_tin": "EMP-API", "period": "2026-01",
-        "idempotency_key": "p1", "employees": EMPLOYEES})
+        "idempotency_key": "p1", "employees": EMPLOYEES}, headers=HDRS)
     assert r.status_code == 201
     assert client.post("/v1/filings/paye", json={
         "employer_tin": "EMP-API", "period": "2026-01",
-        "idempotency_key": "p1", "employees": EMPLOYEES}).status_code == 200
-    h1r = client.post("/v1/filings/paye/h1", params={"employer_tin": "EMP-API", "year": 2026})
+        "idempotency_key": "p1", "employees": EMPLOYEES}, headers=HDRS).status_code == 200
+    h1r = client.post("/v1/filings/paye/h1", params={"employer_tin": "EMP-API", "year": 2026}, headers=HDRS)
     assert h1r.json()["totals"]["employees"] == 2
 
 
@@ -236,13 +240,13 @@ def test_cit_small_company_zero_rated_and_devlevy():
         "tin": "C-3", "fye": "2026-12-31",
         "assessable_profit_kobo": 20_000_000_00,
         "turnover_kobo": 90_000_000_00,
-        "total_fixed_assets_kobo": 40_000_000_00})
+        "total_fixed_assets_kobo": 40_000_000_00}, headers=HDRS)
     assert ok.status_code == 200
     bad = client.post("/v1/filings/cit/compute", json={
         "tin": "C-3", "fye": "2026-12-31",
         "assessable_profit_kobo": 1, "turnover_kobo": 1,
         "total_fixed_assets_kobo": 1,
-        "assets": [{"class": "yacht", "cost_kobo": 1}]})
+        "assets": [{"class": "yacht", "cost_kobo": 1}]}, headers=HDRS)
     assert bad.status_code == 422
     assert bad.headers["content-type"].startswith("application/problem+json")
 
@@ -324,21 +328,21 @@ def test_assessment_api_rfc7807_and_service_channels():
     bad = client.post("/v1/assessments", json={
         "tin": "T", "tax_type": "VAT", "period": "2026-01",
         "kind": "best_of_judgment", "amount_kobo": 100,
-        "grounds": "g", "served_via": "whatsapp", "served_at": "2026-03-01"})
+        "grounds": "g", "served_via": "whatsapp", "served_at": "2026-03-01"}, headers=HDRS)
     assert bad.status_code == 422
     assert bad.headers["content-type"].startswith("application/problem+json")
     ok = client.post("/v1/assessments", json={
         "tin": "T", "tax_type": "VAT", "period": "2026-01",
         "kind": "additional", "amount_kobo": 500_000_00,
         "grounds": "under-declared output VAT", "served_via": "registered_post",
-        "served_at": "2026-03-01"})
+        "served_at": "2026-03-01"}, headers=HDRS)
     assert ok.status_code == 201
     aid = ok.json()["assessment_id"]
     obj = client.post(f"/v1/assessments/{aid}/objections", json={
         "grounds": "figures disputed", "admitted_amount_kobo": 200_000_00,
-        "paid_admitted_kobo": 200_000_00, "filed_at": "2026-03-15"})
+        "paid_admitted_kobo": 200_000_00, "filed_at": "2026-03-15"}, headers=HDRS)
     assert obj.status_code == 201
-    tick = client.post("/v1/assessments/tick", params={"today": "2026-07-01"})
+    tick = client.post("/v1/assessments/tick", params={"today": "2026-07-01"}, headers=HDRS)
     assert any(e.get("referral_id") for e in tick.json()["events"])
-    refs = client.get("/v1/assessments/tat-referrals").json()["referrals"]
+    refs = client.get("/v1/assessments/tat-referrals", headers=HDRS).json()["referrals"]
     assert refs and refs[0]["assessment_id"] == aid
