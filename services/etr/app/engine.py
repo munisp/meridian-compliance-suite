@@ -62,7 +62,14 @@ def _adjust(entity: ConstituentEntity, basis: str, ps: PackSet) -> tuple[int, in
     return income, taxes, applied
 
 
-def compute(ps: PackSet, group: Group, entities: list[ConstituentEntity], req: ComputeRequest) -> Computation:
+def compute(ps: PackSet, group: Group, entities: list[ConstituentEntity], req: ComputeRequest,
+            qdmtt_armed: bool = False) -> Computation:
+    """Run the ETR pipeline.
+
+    `qdmtt_armed` is the SERVER-RESOLVED reg-watch gate state (see
+    app.gates.qdmtt_upgrade_armed). The client-supplied
+    `req.qdmtt_upgrade` field is deliberately ignored (audit fix B2-#10).
+    """
     tr = Tracer()
     pack_versions = ps.versions()
 
@@ -77,7 +84,7 @@ def compute(ps: PackSet, group: Group, entities: list[ConstituentEntity], req: C
         return Computation(
             id=f"cmp-{uuid4().hex[:12]}", group_id=group.id, fiscal_year=req.fiscal_year,
             basis=req.basis, created_at=_now(), in_scope=False,
-            scope_reason="consolidated revenue below threshold", qdmtt_upgrade=req.qdmtt_upgrade,
+            scope_reason="consolidated revenue below threshold", qdmtt_upgrade=qdmtt_armed,
             jurisdictions=[], iir_allocations=[], total_topup_kobo=0, cfc_pool_kobo=0,
             trace=tr.steps, pack_versions=pack_versions)
 
@@ -164,12 +171,12 @@ def compute(ps: PackSet, group: Group, entities: list[ConstituentEntity], req: C
     # ---- step 6: QDMTT (rp-etr-nta etr.nta.qdmtt + upgrade flag) ----
     qdmtt_juris = set(ps.qdmtt_jurisdictions())
     for jr in results:
-        if jr.topup_kobo > 0 and jr.jurisdiction in qdmtt_juris and req.qdmtt_upgrade:
+        if jr.topup_kobo > 0 and jr.jurisdiction in qdmtt_juris and qdmtt_armed:
             jr.qdmtt_applied = True
             jr.qdmtt_kobo = jr.topup_kobo
             jr.residual_topup_kobo = 0
     tr.step("qdmtt", "etr.nta.qdmtt", "rp-etr-nta",
-            {"qdmtt_jurisdictions": sorted(qdmtt_juris), "qdmtt_upgrade": req.qdmtt_upgrade},
+            {"qdmtt_jurisdictions": sorted(qdmtt_juris), "qdmtt_upgrade": qdmtt_armed},
             {"applied": [jr.jurisdiction for jr in results if jr.qdmtt_applied]},
             "QDMTT collects domestic top-up locally when the qdmtt_upgrade gate is armed")
 
@@ -247,7 +254,7 @@ def compute(ps: PackSet, group: Group, entities: list[ConstituentEntity], req: C
     return Computation(
         id=f"cmp-{uuid4().hex[:12]}", group_id=group.id, fiscal_year=req.fiscal_year,
         basis=req.basis, created_at=_now(), in_scope=True,
-        scope_reason="consolidated revenue >= threshold", qdmtt_upgrade=req.qdmtt_upgrade,
+        scope_reason="consolidated revenue >= threshold", qdmtt_upgrade=qdmtt_armed,
         jurisdictions=results, iir_allocations=allocations,
         total_topup_kobo=total_topup, cfc_pool_kobo=cfc_pool_total,
         trace=tr.steps, pack_versions=pack_versions, digest=digest)

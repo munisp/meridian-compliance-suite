@@ -50,7 +50,11 @@ class ComputeRequest(BaseModel):
     group_id: str
     fiscal_year: int = Field(ge=2024, le=2033)
     basis: Literal["dual", "nta", "globe"] = "dual"
-    qdmtt_upgrade: bool = False  # reg-watch gate mirror (rp-etr-nta etr.nta.qdmtt)
+    # DEPRECATED (audit fix B2-#10): client-supplied mirror of the reg-watch
+    # gate. The server IGNORES this field; the QDMTT path activates only when
+    # the reg-watch qdmtt_upgrade gate is resolved as armed server-side
+    # (app/gates.py). Field retained for API backward compatibility only.
+    qdmtt_upgrade: bool = False
 
 
 class StepTrace(BaseModel):
