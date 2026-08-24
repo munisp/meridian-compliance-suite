@@ -93,26 +93,57 @@ def evaluate(body: EvaluateIn, principal=AuthDep):
     except ValueError as exc:
         return problem(422, "evaluation failed", str(exc))
     if body.record:
-        deduction = _persist_deduction(body, result)
+        try:
+            deduction = _persist_deduction(body, result)
+        except IdempotencyConflict as exc:
+            return problem(409, "Idempotency conflict", str(exc))
         result["deduction_id"] = deduction
     return result
+
+
+class IdempotencyConflict(Exception):
+    """B3 #20: idempotency key replayed with a different payload."""
+
+
+def _deduction_payload_hash(body: "EvaluateIn", result: dict) -> str:
+    import hashlib
+    import json
+    body_hash = json.dumps(
+        {"supplier_tin": body.supplier_tin, "vendor_name": body.vendor_name,
+         "payment_type": body.payment_type, "beneficiary": body.beneficiary,
+         "amount_kobo": body.amount_kobo, "tenant_id": body.tenant_id,
+         "wht_kobo": result["wht_kobo"], "rate_bps": result["rate_bps"],
+         "outcome": result["outcome"]},
+        sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(body_hash).hexdigest()
 
 
 def _persist_deduction(body: EvaluateIn, result: dict) -> str:
     # F3b: caller idempotency key -> deterministic deduction id; a retried
     # POST replays the original deduction instead of double-counting it
     # into the next remittance run.
+    # B3 #20: the binding is payload-bound (conflict on key reuse with a
+    # different payload) and concurrent same-key inserts replay instead of
+    # surfacing a 500 IntegrityError.
+    phash = ""
     if getattr(body, "idempotency_key", ""):
         import hashlib
         did = "ded-" + hashlib.sha256(
             f"idem:{body.idempotency_key}".encode()).hexdigest()[:12]
+        phash = _deduction_payload_hash(body, result)
         with db.session() as sess:
-            if sess.get(db.Deduction, did) is not None:
+            existing = sess.get(db.Deduction, did)
+            if existing is not None:
+                if existing.payload_hash and existing.payload_hash != phash:
+                    raise IdempotencyConflict(
+                        "idempotency_key reused with a different payload")
                 return did  # idempotent replay
     else:
         did = f"ded-{uuid.uuid4().hex[:12]}"
     date = result.get("deduction_date") or db.now()[:10]
-    with db.session() as sess:
+    from sqlalchemy.exc import IntegrityError
+    sess = db.session()
+    try:
         sess.add(db.Deduction(
             id=did, tenant_id=body.tenant_id or principal_tenant(),
             vendor_tin=body.supplier_tin, vendor_name=body.vendor_name,
@@ -120,8 +151,22 @@ def _persist_deduction(body: EvaluateIn, result: dict) -> str:
             amount_kobo=body.amount_kobo, rate_bps=result["rate_bps"],
             wht_kobo=result["wht_kobo"], outcome=result["outcome"],
             deduction_trigger=result["deduction_trigger"],
-            deduction_date=date, period=date[:7]))
+            deduction_date=date, period=date[:7], payload_hash=phash))
         sess.commit()
+    except IntegrityError:
+        # B3 #20: lost the same-key race — the other in-flight request
+        # committed first. Replay its row (or conflict on payload mismatch)
+        # instead of surfacing a 500.
+        sess.rollback()
+        existing = sess.get(db.Deduction, did)
+        if existing is None:
+            raise
+        if existing.payload_hash and phash and existing.payload_hash != phash:
+            raise IdempotencyConflict(
+                "idempotency_key reused with a different payload")
+        return did
+    finally:
+        sess.close()
     return did
 
 
@@ -135,7 +180,10 @@ def create_deduction(body: EvaluateIn, principal=AuthDep):
         result = wht_engine.evaluate_wht(body.model_dump())
     except ValueError as exc:
         return problem(422, "evaluation failed", str(exc))
-    did = _persist_deduction(body, result)
+    try:
+        did = _persist_deduction(body, result)
+    except IdempotencyConflict as exc:
+        return problem(409, "Idempotency conflict", str(exc))
     return {"deduction_id": did, "evaluation": result}
 
 
@@ -187,21 +235,62 @@ def get_credits(vendor_tin: str, principal=AuthDep):
 class ApplyCreditIn(BaseModel):
     amount_kobo: int = Field(..., gt=0)
     note: str = ""
+    idempotency_key: str = ""  # B3 #10: dedup retried applies
 
 
 @app.post("/v1/wht/credits/{vendor_tin}/apply", status_code=201)
 def apply_credit(vendor_tin: str, body: ApplyCreditIn, principal=AuthDep):
+    # B3 #10: the old SUM-then-check-then-insert sequence raced — two
+    # concurrent applies could both pass the balance check and overdraw
+    # the credit ledger. The guard is now a single atomic statement: the
+    # INSERT only happens WHERE the current balance covers the amount, so
+    # the check and the debit commit as one database operation.
+    import hashlib
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+    cid = ("cr-" + hashlib.sha256(
+        f"idem:{body.idempotency_key}".encode()).hexdigest()[:12]
+        if body.idempotency_key else f"cr-{uuid.uuid4().hex[:12]}")
     with db.session() as sess:
-        balance = db.credit_balance(sess, vendor_tin)
-        if body.amount_kobo > balance:
+        if body.idempotency_key:
+            existing = sess.get(db.Credit, cid)
+            if existing is not None:
+                if (existing.vendor_tin != vendor_tin
+                        or existing.credit_kobo != -body.amount_kobo):
+                    return problem(409, "Idempotency conflict",
+                                   "idempotency_key reused with a different payload")
+                return {"credit_id": cid, "applied_kobo": body.amount_kobo,
+                        "balance_kobo": db.credit_balance(sess, vendor_tin),
+                        "replayed": True}
+        stmt = text(
+            "INSERT INTO wht_credits"
+            " (id, tenant_id, vendor_tin, credit_kobo, source, period, note, created_at)"
+            " SELECT :id, :tenant, :vtin, :amt, 'application', '', :note, :now"
+            " WHERE (SELECT COALESCE(SUM(credit_kobo), 0) FROM wht_credits"
+            "        WHERE vendor_tin = :vtin) >= :need")
+        try:
+            res = sess.execute(stmt, {
+                "id": cid, "tenant": principal_tenant(), "vtin": vendor_tin,
+                "amt": -body.amount_kobo, "note": body.note,
+                "now": db.now(), "need": body.amount_kobo})
+            sess.commit()
+        except IntegrityError:
+            # concurrent same-key apply committed first — replay it
+            sess.rollback()
+            existing = sess.get(db.Credit, cid)
+            if existing is None:
+                raise
+            if (existing.vendor_tin != vendor_tin
+                    or existing.credit_kobo != -body.amount_kobo):
+                return problem(409, "Idempotency conflict",
+                               "idempotency_key reused with a different payload")
+            return {"credit_id": cid, "applied_kobo": body.amount_kobo,
+                    "balance_kobo": db.credit_balance(sess, vendor_tin),
+                    "replayed": True}
+        if res.rowcount == 0:
+            balance = db.credit_balance(sess, vendor_tin)
             return problem(422, "insufficient credit",
                            f"balance {balance} kobo < requested {body.amount_kobo}")
-        cid = f"cr-{uuid.uuid4().hex[:12]}"
-        sess.add(db.Credit(id=cid, vendor_tin=vendor_tin,
-                           credit_kobo=-body.amount_kobo,
-                           source="application", note=body.note,
-                           created_at=db.now()))
-        sess.commit()
         new_balance = db.credit_balance(sess, vendor_tin)
     return {"credit_id": cid, "applied_kobo": body.amount_kobo,
             "balance_kobo": new_balance}
