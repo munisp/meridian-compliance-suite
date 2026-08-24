@@ -200,7 +200,9 @@ def get_str(str_id: str, request: Request):
         if rec is None:
             return authz.problem(404, "not found", str_id)
         ptenant = decision.get("tenant_id", "")
-        if ptenant and rec.tenant_id != ptenant:
+        # authorize_str_access guarantees a non-empty tenant claim (403
+        # otherwise); any mismatch here is cross-tenant.
+        if rec.tenant_id != ptenant:
             return authz.problem(403, "forbidden",
                                  "str outside caller tenant scope")
         return rec.to_dict()

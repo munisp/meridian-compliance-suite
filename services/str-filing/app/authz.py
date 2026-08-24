@@ -197,7 +197,15 @@ def authorize_str_access(request: Request, *, write: bool = False,
     if not set(need) & set(principal.get("roles", [])):
         return problem(403, "forbidden", f"requires one of {sorted(need)}")
     ptenant = principal.get("tenant_id", "")
-    if ptenant and tenant_id and tenant_id != ptenant:
+    if not ptenant:
+        # R3 verifier hole (same class as B4-4 in einvoicing #38): a
+        # verified principal with an EMPTY tenant claim was previously a
+        # cross-tenant wildcard (the old `if ptenant and ...` check failed
+        # open). Tenant-scoped STR routes require a tenant claim.
+        return problem(403, "forbidden",
+                       "principal carries no tenant claim; "
+                       "tenant-scoped access denied")
+    if tenant_id and tenant_id != ptenant:
         return problem(403, "forbidden",
                        f"tenant {tenant_id!r} outside caller scope")
     return principal
