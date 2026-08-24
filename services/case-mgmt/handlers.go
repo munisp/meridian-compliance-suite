@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -371,12 +372,62 @@ func (s *Service) handleRelList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"tuples": s.rel.Tuples()})
 }
 
+// grantableRelations is the allowed set of relations that may be
+// granted/revoked via the API — mirrors schemas/case-mgmt.perm exactly
+// (B2 #3). Anything outside this set is rejected 400.
+var grantableRelations = map[string]map[string]bool{
+	"matter": {"counsel": true, "client": true, "supervising_partner": true},
+	"doc":    {"matter": true, "owner": true},
+}
+
+// validateRelationTuple enforces the schema-allowed relation set and the
+// type:id reference form on entity/subject.
+func validateRelationTuple(t RelationTuple) error {
+	etyp, eid, ok := strings.Cut(t.Entity, ":")
+	if !ok || etyp == "" || eid == "" {
+		return fmt.Errorf("entity %q must be type:id", t.Entity)
+	}
+	styp, sid, ok := strings.Cut(t.Subject, ":")
+	if !ok || styp == "" || sid == "" {
+		return fmt.Errorf("subject %q must be type:id", t.Subject)
+	}
+	rels, ok := grantableRelations[etyp]
+	if !ok {
+		return fmt.Errorf("entity type %q has no grantable relations", etyp)
+	}
+	if !rels[t.Relation] {
+		return fmt.Errorf("relation %q not grantable on %q", t.Relation, etyp)
+	}
+	return nil
+}
+
+// requireRelAdmin gates relation grant/revoke: admin role only, actor from
+// the verified principal (B2 #3 — previously any authenticated caller could
+// self-grant Permify relations, defeating every checkRel).
+func (s *Service) requireRelAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if roleOf(r) != "admin" {
+		writeProblem(w, 403, "forbidden",
+			"relation grant/revoke requires the admin role")
+		return false
+	}
+	return true
+}
+
 func (s *Service) handleRelGrant(w http.ResponseWriter, r *http.Request) {
+	if !s.requireRelAdmin(w, r) {
+		return
+	}
 	var t RelationTuple
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&t); err != nil {
 		writeProblem(w, 400, "bad request", err.Error())
 		return
 	}
+	if err := validateRelationTuple(t); err != nil {
+		writeProblem(w, 400, "bad request", err.Error())
+		return
+	}
+	log.Printf("component=case-mgmt audit rel-grant actor=%s entity=%s relation=%s subject=%s",
+		subjectOf(r), t.Entity, t.Relation, t.Subject)
 	if s.perm != nil {
 		if err := s.perm.WriteRelationship(r.Context(), t.Entity, t.Relation, t.Subject); err != nil {
 			log.Printf("component=case-mgmt permify relationship write failed: %v", err)
@@ -391,11 +442,20 @@ func (s *Service) handleRelGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRelRevoke(w http.ResponseWriter, r *http.Request) {
+	if !s.requireRelAdmin(w, r) {
+		return
+	}
 	var t RelationTuple
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&t); err != nil {
 		writeProblem(w, 400, "bad request", err.Error())
 		return
 	}
+	if err := validateRelationTuple(t); err != nil {
+		writeProblem(w, 400, "bad request", err.Error())
+		return
+	}
+	log.Printf("component=case-mgmt audit rel-revoke actor=%s entity=%s relation=%s subject=%s",
+		subjectOf(r), t.Entity, t.Relation, t.Subject)
 	if s.perm != nil {
 		if err := s.perm.DeleteRelationship(r.Context(), t.Entity, t.Relation, t.Subject); err != nil {
 			log.Printf("component=case-mgmt permify relationship delete failed: %v", err)
