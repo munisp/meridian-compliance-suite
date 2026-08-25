@@ -31,6 +31,7 @@ like `services/pos-vat/embedded_packs.go`).
 - `POST /v1/filings/paye`, `POST /v1/filings/paye/h1?employer_tin&year`
 - `POST /v1/filings/cit/compute`
 - `POST /v1/assessments`, `GET /v1/assessments/{id}`, `POST /v1/assessments/{id}/objections`, `POST /v1/objections/{id}/decision`, `POST /v1/assessments/tick?today=`, `GET /v1/assessments/tat-referrals`
+- `GET /v1/exports/taxpromax.csv?tin=&from_period=&to_period=&tax_type=` — I2 TaxProMax CSV export of filed returns for accountants; authenticated + TIN-scoped (taxpayer own-TIN), streams `text/csv`, audit-logged per export. Column format is documented in `app/taxpromax.py` (naira 2dp; the nactp reference export lacked TIN/tax-type columns, so a clean format was defined rather than copied)
 
 ## Tests
 
