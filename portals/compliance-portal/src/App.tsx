@@ -10,6 +10,7 @@ import Etr from './pages/Etr'
 import Vasp from './pages/Vasp'
 import Pos from './pages/Pos'
 import Cases from './pages/Cases'
+import Merchant from './pages/Merchant'
 
 export default function App() {
   const { user } = useAuth()
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/vasp" element={<Vasp />} />
         <Route path="/pos" element={<Pos />} />
         <Route path="/cases" element={<Cases />} />
+        <Route path="/merchant" element={<Merchant />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

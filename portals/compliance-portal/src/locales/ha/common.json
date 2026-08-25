@@ -1,6 +1,6 @@
 {
   "app": { "title": "Meridian", "subtitle": "Tashar Bin Ka'idoji", "tagline": "Hukumar Haraji ta Najeriya (NRS) · TaxTech" },
-  "nav": { "overview": "Bayani Gabaɗaya", "einvoicing": "E-Invoicing", "wht": "WHT", "etr": "ETR (Pillar Two)", "vasp": "VASP / CARF", "pos": "POS na Ɗan kasuwa", "cases": "Mai Ba da Shawara" },
+  "nav": { "overview": "Bayani Gabaɗaya", "einvoicing": "E-Invoicing", "wht": "WHT", "etr": "ETR (Pillar Two)", "vasp": "VASP / CARF", "pos": "POS na Ɗan kasuwa", "cases": "Mai Ba da Shawara", "merchant": "Kasuwanci" },
   "auth": { "signOut": "Fita", "signIn": "Shiga" },
   "lang": { "label": "Harshe", "en": "English", "ha": "Hausa", "yo": "Yorùbá", "ig": "Igbo" }
 }
