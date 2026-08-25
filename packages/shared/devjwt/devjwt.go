@@ -118,3 +118,11 @@ func Middleware(next http.Handler) http.Handler {
 func withClaims(r *http.Request, c Claims) context.Context {
 	return context.WithValue(r.Context(), ctxKey{}, c)
 }
+
+// WithClaims returns a request carrying c as the authenticated principal.
+// Services use it when an alternative credential (e.g. an API key, feature
+// I5) has been verified outside the JWT middleware and must be injected as
+// the request principal.
+func WithClaims(r *http.Request, c Claims) *http.Request {
+	return r.WithContext(withClaims(r, c))
+}

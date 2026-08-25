@@ -54,6 +54,7 @@ type Server struct {
 	runner     *InprocRunner
 	serviceIDs *ServiceIDRegistry
 	webhooks   *WebhookRegistry
+	apiKeys    *APIKeyStore
 	// FF-6: per-invoice in-flight guard serializing workflow drivers
 	// (handler / retry-resume / recovery sweep) — see nrs_resume.go.
 	resumeMu       sync.Mutex
@@ -159,6 +160,10 @@ func main() {
 			log.Printf("migrations: %v (DB uniqueness may be unenforced)", err)
 		}
 	}
+	apiKeys, err := NewAPIKeyStore(filepath.Join(dir, "apikeys.jsonl"))
+	if err != nil {
+		log.Fatalf("apikey store: %v", err)
+	}
 	outbox, err := envelope.NewOutbox(filepath.Join(dir, "outbox.jsonl"))
 	if err != nil {
 		log.Fatalf("outbox: %v", err)
@@ -202,6 +207,7 @@ func main() {
 		runner:     NewInprocRunner(),
 		serviceIDs: NewServiceIDRegistry(),
 		webhooks:   NewWebhookRegistry(nil),
+		apiKeys:    apiKeys,
 	}
 	// Dev in-process webhook sink when WEBHOOK_SINK=inproc (default HTTP).
 	if os.Getenv("WEBHOOK_SINK") == "inproc" {
@@ -235,6 +241,12 @@ func main() {
 	mux.HandleFunc("GET /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, srv.router.List())
 	})
+	// I5 merchant self-service: API key lifecycle + VAT dashboard summary.
+	mux.HandleFunc("POST /v1/apikeys", srv.handleAPIKeyCreate)
+	mux.HandleFunc("GET /v1/apikeys", srv.handleAPIKeyList)
+	mux.HandleFunc("POST /v1/apikeys/{id}/rotate", srv.handleAPIKeyRotate)
+	mux.HandleFunc("POST /v1/apikeys/{id}/revoke", srv.handleAPIKeyRevoke)
+	mux.HandleFunc("GET /v1/vat/summary", srv.handleVATSummary)
 	mux.HandleFunc("GET /v1/csid/public-key", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"key_id": srv.signer.KeyID(), "public_key_hex": srv.signer.PublicKeyHex()})
 	})
@@ -245,7 +257,10 @@ func main() {
 	}
 	log.Printf("%s %s listening on :%s (data dir %s)", serviceName, serviceVersion, port, dir)
 	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
-	log.Fatal(httpx.ListenAndServe(":"+port, devjwt.Middleware(mux)))
+	// X-Api-Key (merchant self-service keys, I5) is verified first and maps
+	// to a tenant-scoped operator principal; requests without it fall
+	// through to the JWT/dev middleware unchanged.
+	log.Fatal(httpx.ListenAndServe(":"+port, srv.apiKeyMiddleware(mux, devjwt.Middleware(mux))))
 }
 
 // handleCreateInvoice ingests via REST/CSV/SAP-OData adapters with
