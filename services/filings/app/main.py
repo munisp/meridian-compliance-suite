@@ -7,10 +7,10 @@ import os
 from datetime import date
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import assessment, authz, cit, paye, vat
+from . import assessment, authz, cit, paye, taxpromax, vat
 from meridian_py.dev_jwt import Principal
 
 app = FastAPI(title="filings", version="1.0.0")
@@ -135,6 +135,29 @@ def compute_cit(body: CitComputeIn,
                                   body.assets, body.losses)
     except ValueError as e:
         _err(e)
+
+
+# ---------- I2 TaxProMax CSV export ----------
+
+@app.get("/v1/exports/taxpromax.csv")
+def export_taxpromax(tin: str, from_period: str | None = None,
+                     to_period: str | None = None, tax_type: str | None = None,
+                     principal: Principal = Depends(authz.require_reader)):
+    """Stream filed returns for one TIN as TaxProMax CSV (see app/taxpromax.py
+    for the documented column format). Authenticated + TIN-scoped; every
+    export is audit-logged."""
+    authz.require_tin_scope(principal, tin)
+    try:
+        rows = taxpromax.collect_rows(vat_store, paye_store, tin,
+                                      from_period, to_period, tax_type)
+    except ValueError as e:
+        _err(e, status=400)
+    taxpromax.audit_export(vat_store._docs, principal.sub, tin,
+                           from_period, to_period, tax_type, len(rows))
+    return StreamingResponse(
+        taxpromax.stream_csv(rows), media_type="text/csv",
+        headers={"Content-Disposition":
+                 f'attachment; filename="taxpromax_{tin}.csv"'})
 
 
 # ---------- F4 assessments & objections ----------
