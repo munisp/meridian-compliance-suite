@@ -181,11 +181,27 @@ func (h *HTTPMBS) ReportB2C(ctx context.Context, inv *CanonicalInvoice) (*B2CRep
 // simulator, so prod refuses to boot without an explicit MBS_BASE_URL
 // (hard-fatal, same contract as the NIMC adapter in inclusion-suite).
 func NewMBSClient() MBSClient {
+	// Feature I1: MBS_PROFILE=sandbox|live selects the rail explicitly. Unset
+	// preserves the legacy MBS_BASE_URL prod gate below (unchanged behavior).
+	switch selectMBSProfile() {
+	case "":
+		// legacy gate (QA-22), unchanged
+	case "sandbox":
+		if os.Getenv("PROFILE") == "prod" || os.Getenv("PROFILE") == "production" {
+			log.Fatal("PROFILE=prod FATAL: MBS_PROFILE=sandbox is not permitted in prod (fail-closed)")
+		}
+		log.Printf("profile=dev component=mbs-adapter rail=sandbox (explicit MBS_PROFILE)")
+		return NewSandboxMBS()
+	case "live":
+		return newLiveRailOrFatal()
+	default:
+		log.Fatalf("MBS FATAL: unknown MBS_PROFILE %q (want sandbox|live)", os.Getenv(mbsProfileEnv))
+	}
 	if base := os.Getenv("MBS_BASE_URL"); base != "" {
 		return &HTTPMBS{BaseURL: base}
 	}
 	if os.Getenv("PROFILE") == "prod" || os.Getenv("PROFILE") == "production" {
-		log.Fatal("PROFILE=prod FATAL: MBS_BASE_URL is required (refusing to start with the MBS sandbox simulator)")
+		log.Fatal("PROFILE=prod FATAL: MBS_BASE_URL or MBS_PROFILE=live is required (refusing to start with the MBS sandbox simulator)")
 	}
 	log.Printf("profile=dev component=mbs-adapter (sandbox simulator)")
 	return NewSandboxMBS()
