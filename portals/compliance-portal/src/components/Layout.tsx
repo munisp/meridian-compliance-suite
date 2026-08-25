@@ -2,7 +2,7 @@ import React from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  LayoutDashboard, FileText, Percent, Globe2, Bitcoin, ReceiptText, Briefcase, LogOut, LucideIcon,
+  LayoutDashboard, FileText, Percent, Globe2, Bitcoin, ReceiptText, Briefcase, KeyRound, LogOut, LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '../auth'
 import LangSwitcher from './LangSwitcher'
@@ -15,6 +15,7 @@ const NAV: { to: string; key: string; end?: boolean; icon: LucideIcon }[] = [
   { to: '/vasp', key: 'vasp', icon: Bitcoin },
   { to: '/pos', key: 'pos', icon: ReceiptText },
   { to: '/cases', key: 'cases', icon: Briefcase },
+  { to: '/merchant', key: 'merchant', icon: KeyRound },
 ]
 
 export default function Layout() {

@@ -1,6 +1,6 @@
 {
   "app": { "title": "Meridian", "subtitle": "Ìlátó Ìfaradà", "tagline": "Nigeria Revenue Service · TaxTech" },
-  "nav": { "overview": "Àkópọ̀", "einvoicing": "E-Invoicing", "wht": "WHT", "etr": "ETR (Pillar Two)", "vasp": "VASP / CARF", "pos": "POS Oníṣòwò", "cases": "Aṣíṣẹ́" },
+  "nav": { "overview": "Àkópọ̀", "einvoicing": "E-Invoicing", "wht": "WHT", "etr": "ETR (Pillar Two)", "vasp": "VASP / CARF", "pos": "POS Oníṣòwò", "cases": "Aṣíṣẹ́", "merchant": "Oníṣòwò" },
   "auth": { "signOut": "Jáde", "signIn": "Wọlé" },
   "lang": { "label": "Èdè", "en": "English", "ha": "Hausa", "yo": "Yorùbá", "ig": "Igbo" }
 }
