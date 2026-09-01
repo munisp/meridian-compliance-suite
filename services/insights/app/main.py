@@ -18,6 +18,15 @@ validate_auth_config()
 
 app = FastAPI(title="insights", version="1.0.0")
 
+
+# OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup or
+# money paths. Instruments FastAPI + outbound httpx/requests; tenant.id is
+# stamped on the active span + baggage. Authz/tenant guards untouched.
+from meridian_py.otel import TenantBaggageMiddleware, init_otel
+
+init_otel(app)
+app.add_middleware(TenantBaggageMiddleware)
+
 # Role claims -> scopes: admin/operator may run analyses (write scope);
 # any authenticated principal (incl. auditor) may read (read scope).
 ReadDep = AuthDep
