@@ -37,6 +37,15 @@ VERSION = "1.0.0"
 app = FastAPI(title="Meridian TP/CbCR Service", version=VERSION)
 
 
+# OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup or
+# money paths. Instruments FastAPI + outbound httpx/requests; tenant.id is
+# stamped on the active span + baggage. Authz/tenant guards untouched.
+from meridian_py.otel import TenantBaggageMiddleware, init_otel
+
+init_otel(app)
+app.add_middleware(TenantBaggageMiddleware)
+
+
 @app.exception_handler(HTTPException)
 async def http_exc_handler(_: Request, exc: HTTPException):
     return problem(exc.status_code, str(exc.detail), "")
