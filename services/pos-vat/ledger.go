@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 	"os"
 	"sync"
 	"time"
@@ -104,7 +106,7 @@ func (h *HTTPLedger) do(method, path string, body any, out any) error {
 	req, _ := http.NewRequest(method, h.Base+path, rdr)
 	req.Header.Set("Content-Type", "application/json")
 	setServiceAuthHeaders(req, "pos-vat")
-	cli := &http.Client{Timeout: 3 * time.Second}
+	cli := &http.Client{Timeout: 3 * time.Second, Transport: otelx.Client(nil)}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
