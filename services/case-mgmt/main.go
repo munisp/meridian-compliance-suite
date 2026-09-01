@@ -10,6 +10,7 @@ import (
 
 	"github.com/munisp/meridian-compliance-suite/packages/authx"
 	"github.com/munisp/meridian-compliance-suite/packages/httpx"
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 )
 
@@ -54,6 +55,10 @@ func main() {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		log.Fatalf("datadir: %v", err)
 	}
+
+	// OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup.
+	otelProv := otelx.InitProviders(context.Background())
+	defer otelProv.Shutdown(context.Background())
 	var worm WORMClient
 	if cfg.WORMURL != "" {
 		worm = &HTTPWORM{Base: cfg.WORMURL}
@@ -140,7 +145,7 @@ func main() {
 	mux.HandleFunc("POST /v1/workflows/{name}/run", svc.auth(svc.handleWorkflowRun))
 
 	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
-	srv := httpx.NewServer(":"+cfg.Port, svc.recover(svc.logging(mux)))
+	srv := httpx.NewServer(":"+cfg.Port, svc.recover(svc.logging(otelx.Middleware(mux))))
 	log.Printf("case-mgmt listening on :%s (auth=%s worm=%s notify=%s)",
 		cfg.Port, cfg.AuthMode, orDef(cfg.WORMURL, "local"), orDef(cfg.NotifyURL, "log"))
 	log.Fatal(httpx.Serve(srv))

@@ -10,6 +10,7 @@ import (
 
 	"github.com/munisp/meridian-compliance-suite/packages/authx"
 	"github.com/munisp/meridian-compliance-suite/packages/httpx"
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 )
 
 type Config struct {
@@ -49,6 +50,10 @@ func main() {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		log.Fatalf("datadir: %v", err)
 	}
+
+	// OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup.
+	otelProv := otelx.InitProviders(context.Background())
+	defer otelProv.Shutdown(context.Background())
 	svc := &Service{
 		cfg: cfg, engine: NewEngine(cfg.DataDir), packs: NewPackSet(cfg.RegistryURL),
 		gates: NewGateChecker(cfg.RegWatchURL, cfg.DataDir), carf: NewCARFStore(cfg.DataDir),
@@ -97,7 +102,7 @@ func main() {
 	mux.HandleFunc("GET /v1/packs", svc.auth(svc.handlePacks))
 
 	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
-	srv := httpx.NewServer(":"+cfg.Port, svc.recover(svc.logging(mux)))
+	srv := httpx.NewServer(":"+cfg.Port, svc.recover(svc.logging(otelx.Middleware(mux))))
 	log.Printf("vasp-carf listening on :%s (auth=%s registry=%s regwatch=%s)",
 		cfg.Port, cfg.AuthMode, orDef(cfg.RegistryURL, "embedded"), orDef(cfg.RegWatchURL, "local-gate-file"))
 	log.Fatal(httpx.Serve(srv))
