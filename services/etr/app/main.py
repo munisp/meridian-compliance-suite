@@ -46,6 +46,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="meridian-etr", version="1.0.0", lifespan=lifespan)
 
 
+# OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup or
+# money paths. Instruments FastAPI + outbound httpx/requests; tenant.id is
+# stamped on the active span + baggage. Authz/tenant guards untouched.
+from meridian_py.otel import TenantBaggageMiddleware, init_otel
+
+init_otel(app)
+app.add_middleware(TenantBaggageMiddleware)
+
+
 # ---------- RFC7807 errors ----------
 
 @app.exception_handler(HTTPException)

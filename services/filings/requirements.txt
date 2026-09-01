@@ -7,3 +7,9 @@ psycopg[binary]==3.3.4
 # Internal shared auth package (packages/py) — required: B2 #1 auth on all routes
 meridian-py @ file:../../packages/py
 pyjwt==2.13.0
+# OpenTelemetry (otel-foundation contract, DESIGN-CONTRACT.md) — fail-soft
+opentelemetry-sdk==1.30.0
+opentelemetry-exporter-otlp-proto-grpc==1.30.0
+opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-instrumentation-httpx==0.51b0
+opentelemetry-instrumentation-requests==0.51b0

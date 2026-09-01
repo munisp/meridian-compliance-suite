@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 )
 
 // ---------- WORM evidence: core audit-evidence API + local fallback ----------
@@ -35,7 +37,7 @@ func (h *HTTPWORM) Store(kind string, payload []byte, meta map[string]string) (*
 		"kind": kind, "sha256": hex.EncodeToString(sum[:]),
 		"payload_b64": payload, "meta": meta,
 	})
-	cli := &http.Client{Timeout: 3 * time.Second}
+	cli := &http.Client{Timeout: 3 * time.Second, Transport: otelx.Client(nil)}
 	resp, err := cli.Post(h.Base+"/v1/evidence", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -99,7 +101,7 @@ func (n *HTTPNotifier) Send(channel, to, subject, body string) (string, error) {
 	payload, _ := json.Marshal(map[string]string{
 		"channel": channel, "to": to, "subject": subject, "body": body,
 	})
-	cli := &http.Client{Timeout: 3 * time.Second}
+	cli := &http.Client{Timeout: 3 * time.Second, Transport: otelx.Client(nil)}
 	resp, err := cli.Post(n.Base+"/v1/send", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return "", err

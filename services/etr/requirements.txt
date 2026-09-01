@@ -6,3 +6,11 @@ httpx==0.28.1
 pytest==9.1.1
 PyJWT[crypto]==2.13.0
 psycopg[binary]==3.3.4
+# OpenTelemetry (otel-foundation contract, DESIGN-CONTRACT.md) — fail-soft
+opentelemetry-sdk==1.30.0
+opentelemetry-exporter-otlp-proto-grpc==1.30.0
+opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-instrumentation-httpx==0.51b0
+opentelemetry-instrumentation-requests==0.51b0
+# Internal shared package (packages/py) — required by meridian_py.otel OTel bootstrap
+meridian-py @ file:../../packages/py

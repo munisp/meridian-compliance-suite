@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 )
 
 // MBS pre-clearance client (SPEC §3 T1/T2): submit signed invoice → IRN +
@@ -127,7 +130,7 @@ func (h *HTTPMBS) http() *http.Client {
 	if h.Client != nil {
 		return h.Client
 	}
-	return &http.Client{Timeout: 10 * time.Second}
+	return &http.Client{Timeout: 10 * time.Second, Transport: otelx.Client(nil)}
 }
 
 func (h *HTTPMBS) Preclear(ctx context.Context, inv *CanonicalInvoice, ublXML []byte) (*ClearanceResult, error) {

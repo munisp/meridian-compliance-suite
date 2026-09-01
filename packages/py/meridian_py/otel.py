@@ -110,6 +110,13 @@ def init_otel(app: Optional[Any] = None, *, tracer_provider=None) -> bool:
                     FastAPIInstrumentor,
                 )
 
+                # TenantBaggageMiddleware must sit INSIDE the instrumentor's
+                # middleware so the server span is active when tenant.id is
+                # stamped; Starlette runs later-added middleware outermost,
+                # so add it before instrumenting. A caller-side
+                # app.add_middleware(TenantBaggageMiddleware) afterwards is
+                # harmless (idempotent outer baggage hop).
+                app.add_middleware(TenantBaggageMiddleware)
                 FastAPIInstrumentor.instrument_app(app, tracer_provider=tracer_provider)
             elif module.startswith("flask"):
                 from opentelemetry.instrumentation.flask import FlaskInstrumentor

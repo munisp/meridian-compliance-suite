@@ -7,11 +7,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/munisp/meridian-compliance-suite/packages/httpx"
-	"os"
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 )
 
 type Config struct {
@@ -51,6 +53,10 @@ func main() {
 		log.Fatalf("datadir: %v", err)
 	}
 
+	// OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup.
+	otelProv := otelx.InitProviders(context.Background())
+	defer otelProv.Shutdown(context.Background())
+
 	svc := NewService(cfg)
 	svc.packs.LoadPacks()
 
@@ -79,7 +85,7 @@ func main() {
 	mux.HandleFunc("GET /v1/workflows", svc.auth(svc.handleWorkflowList))
 
 	// F-5: graceful shutdown on SIGTERM/SIGINT + full server timeouts.
-	srv := httpx.NewServer(":"+cfg.Port, svc.recoverMiddleware(svc.logging(mux)))
+	srv := httpx.NewServer(":"+cfg.Port, svc.recoverMiddleware(svc.logging(otelx.Middleware(mux))))
 	log.Printf("pos-vat listening on :%s (auth=%s bus=%s ledger=%s geo=%s registry=%s redis=%s)",
 		cfg.Port, cfg.AuthMode, cfg.EventBus, orElse(cfg.LedgerURL, "dev-inmem"), orElse(cfg.GeoURL, "embedded"),
 		orElse(cfg.RegistryURL, "embedded"), orElse(cfg.RedisURL, "in-mem"))

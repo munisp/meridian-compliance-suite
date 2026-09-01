@@ -20,6 +20,7 @@ import (
 
 	"github.com/munisp/meridian-compliance-suite/packages/httpx"
 	"github.com/munisp/meridian-compliance-suite/packages/keyx/provider"
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 	"github.com/munisp/meridian-compliance-suite/packages/pgmigrate"
 	"github.com/munisp/meridian-compliance-suite/packages/prodx"
 	"github.com/munisp/meridian-compliance-suite/packages/shared/devjwt"
@@ -134,6 +135,10 @@ func writeStoreConflict(w http.ResponseWriter, err error) {
 }
 
 func main() {
+	// OTel bootstrap (DESIGN-CONTRACT.md): fail-soft, never breaks startup.
+	otelProv := otelx.InitProviders(context.Background())
+	defer otelProv.Shutdown(context.Background())
+
 	// M-4: prod refuses to boot on the silent QR dev-key default.
 	if err := validateQRKey(); err != nil {
 		log.Fatalf("qr: %v", err)
@@ -260,7 +265,9 @@ func main() {
 	// X-Api-Key (merchant self-service keys, I5) is verified first and maps
 	// to a tenant-scoped operator principal; requests without it fall
 	// through to the JWT/dev middleware unchanged.
-	log.Fatal(httpx.ListenAndServe(":"+port, srv.apiKeyMiddleware(mux, devjwt.Middleware(mux))))
+	// OTel (DESIGN-CONTRACT.md): wraps the mux directly so the ServeMux
+	// route template lands on http.route; authz chain is untouched.
+	log.Fatal(httpx.ListenAndServe(":"+port, srv.apiKeyMiddleware(mux, devjwt.Middleware(otelx.Middleware(mux)))))
 }
 
 // handleCreateInvoice ingests via REST/CSV/SAP-OData adapters with

@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+
+	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 )
 
 // NRS live-rail port (Feature I1): structured port of the NRS/Gention Global
@@ -159,7 +162,7 @@ func (c *LiveRailClient) http() *http.Client {
 	if c.client != nil {
 		return c.client
 	}
-	return &http.Client{Timeout: 15 * time.Second}
+	return &http.Client{Timeout: 15 * time.Second, Transport: otelx.Client(nil)}
 }
 
 // login runs the Gention auth token flow: POST {email, password} →
