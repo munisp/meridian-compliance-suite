@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-
 	"github.com/munisp/meridian-compliance-suite/packages/otelx"
 )
 
@@ -88,11 +87,11 @@ const (
 // LiveRailConfig carries the live NRS/Gention rail configuration. Every field
 // is sourced from the environment; nothing is baked into the binary.
 type LiveRailConfig struct {
-	BaseURL   string // MBS_LIVE_BASE_URL, fallback NRS_BASE_URL
-	APIKey    string // MBS_LIVE_API_KEY, fallback NRS_API_KEY
-	APISecret string // MBS_LIVE_API_SECRET, fallback NRS_API_SECRET
-	Email     string // MBS_LIVE_EMAIL, fallback NRS_EMAIL (auth login flow)
-	Password  string // MBS_LIVE_PASSWORD, fallback NRS_PASSWORD
+	BaseURL   string // MBS_LIVE_BASE_URL
+	APIKey    string // MBS_LIVE_API_KEY
+	APISecret string // MBS_LIVE_API_SECRET
+	Email     string // MBS_LIVE_EMAIL (auth login flow)
+	Password  string // MBS_LIVE_PASSWORD
 	ServiceID string // NRS_SERVICE_ID (optional; invoice ServiceID wins)
 }
 
@@ -106,14 +105,17 @@ func firstEnv(keys ...string) string {
 }
 
 // LiveRailConfigFromEnv loads and validates the live-rail config. It is
-// fail-closed: any missing required field is an error.
+// fail-closed: any missing required field is an error, the base URL must be
+// https, and the live profile reads ONLY MBS_LIVE_* credentials — there is
+// no silent fallback to the legacy NRS_* variables, so a half-configured
+// live cutover can never run with stale sandbox credentials.
 func LiveRailConfigFromEnv() (LiveRailConfig, error) {
 	cfg := LiveRailConfig{
-		BaseURL:   strings.TrimRight(firstEnv("MBS_LIVE_BASE_URL", "NRS_BASE_URL"), "/"),
-		APIKey:    firstEnv("MBS_LIVE_API_KEY", "NRS_API_KEY"),
-		APISecret: firstEnv("MBS_LIVE_API_SECRET", "NRS_API_SECRET"),
-		Email:     firstEnv("MBS_LIVE_EMAIL", "NRS_EMAIL"),
-		Password:  firstEnv("MBS_LIVE_PASSWORD", "NRS_PASSWORD"),
+		BaseURL:   strings.TrimRight(os.Getenv("MBS_LIVE_BASE_URL"), "/"),
+		APIKey:    os.Getenv("MBS_LIVE_API_KEY"),
+		APISecret: os.Getenv("MBS_LIVE_API_SECRET"),
+		Email:     os.Getenv("MBS_LIVE_EMAIL"),
+		Password:  os.Getenv("MBS_LIVE_PASSWORD"),
 		ServiceID: firstEnv("NRS_SERVICE_ID"),
 	}
 	var missing []string
@@ -133,7 +135,11 @@ func LiveRailConfigFromEnv() (LiveRailConfig, error) {
 		missing = append(missing, "MBS_LIVE_PASSWORD")
 	}
 	if len(missing) > 0 {
-		return LiveRailConfig{}, fmt.Errorf("MBS_PROFILE=live requires %s", strings.Join(missing, ", "))
+		return LiveRailConfig{}, fmt.Errorf("MBS_PROFILE=live requires %s (no NRS_* fallback in the live profile)", strings.Join(missing, ", "))
+	}
+	// Live rail carries fiscal data + credentials: plaintext http is refused.
+	if !strings.HasPrefix(strings.ToLower(cfg.BaseURL), "https://") {
+		return LiveRailConfig{}, fmt.Errorf("MBS_PROFILE=live requires an https:// MBS_LIVE_BASE_URL, got %q", cfg.BaseURL)
 	}
 	return cfg, nil
 }
@@ -149,6 +155,10 @@ type LiveRailClient struct {
 
 	mu    sync.Mutex
 	token string
+
+	// loginMu single-flights the auth login flow: concurrent first-use (or a
+	// concurrent 401 storm after token expiry) runs exactly one login.
+	loginMu sync.Mutex
 }
 
 // NewLiveRailClient builds the live-rail adapter from a validated config.
@@ -200,7 +210,9 @@ func (c *LiveRailClient) login(ctx context.Context) error {
 	return nil
 }
 
-// accessToken returns the cached JWT, logging in on first use.
+// accessToken returns the cached JWT, logging in on first use. The login is
+// single-flighted so concurrent first-use does not stampede the auth
+// endpoint.
 func (c *LiveRailClient) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	tok := c.token
@@ -208,6 +220,23 @@ func (c *LiveRailClient) accessToken(ctx context.Context) (string, error) {
 	if tok != "" {
 		return tok, nil
 	}
+	return c.refreshToken(ctx)
+}
+
+// refreshToken forces a re-login (single-flighted) and returns the new JWT.
+// Callers use it on 401 so an expired cached token self-heals instead of
+// permanently failing every rail call until restart.
+func (c *LiveRailClient) refreshToken(ctx context.Context) (string, error) {
+	c.loginMu.Lock()
+	defer c.loginMu.Unlock()
+	// Double-check under the login lock: a goroutine that queued behind a
+	// concurrent refresh reuses the fresh token instead of logging in again.
+	c.mu.Lock()
+	if tok := c.token; tok != "" {
+		c.mu.Unlock()
+		return tok, nil
+	}
+	c.mu.Unlock()
 	if err := c.login(ctx); err != nil {
 		return "", err
 	}
@@ -217,6 +246,14 @@ func (c *LiveRailClient) accessToken(ctx context.Context) (string, error) {
 		return "", errors.New("nrs login produced no access token")
 	}
 	return c.token, nil
+}
+
+// invalidateToken drops the cached JWT (e.g. after a 401) so the next call
+// re-authenticates.
+func (c *LiveRailClient) invalidateToken() {
+	c.mu.Lock()
+	c.token = ""
+	c.mu.Unlock()
 }
 
 // newRequest builds an authenticated rail request with the Gention headers.
@@ -246,12 +283,19 @@ func (c *LiveRailClient) newRequest(ctx context.Context, method, path string, pa
 	return req, nil
 }
 
+// errUnauthorized marks a 401 from the rail so callers can trigger one
+// token refresh + retry.
+var errUnauthorized = errors.New("nrs rail: unauthorized")
+
 func (c *LiveRailClient) do(req *http.Request, out any) error {
 	resp, err := c.http().Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return errUnauthorized
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("nrs rail %s %s: status %d", req.Method, req.URL.Path, resp.StatusCode)
 	}
@@ -261,27 +305,57 @@ func (c *LiveRailClient) do(req *http.Request, out any) error {
 	return nil
 }
 
+// doAuthed builds an authenticated request and executes it; on a 401 the
+// cached JWT is invalidated, a single re-login runs, and the request is
+// retried exactly once with the fresh token. A second 401 is returned as an
+// error (the credential set is rejected, retrying would loop).
+func (c *LiveRailClient) doAuthed(ctx context.Context, method, path string, payload any, out any) error {
+	req, err := c.newRequest(ctx, method, path, payload)
+	if err != nil {
+		return err
+	}
+	err = c.do(req, out)
+	if !errors.Is(err, errUnauthorized) {
+		return err
+	}
+	c.invalidateToken()
+	tok, rerr := c.refreshToken(ctx)
+	if rerr != nil {
+		return fmt.Errorf("nrs token refresh after 401: %w", rerr)
+	}
+	req, err = c.newRequest(ctx, method, path, payload)
+	if err != nil {
+		return err
+	}
+	req.Header.Set(liveRailHeaderAuth, "Bearer "+tok)
+	if err := c.do(req, out); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Preclear maps MBS pre-clearance onto the NRS invoice upload endpoint: the
 // signed invoice (canonical model + UBL XML) is submitted for clearance and
 // the rail's IRN/crypto-stamp response is decoded into ClearanceResult.
 func (c *LiveRailClient) Preclear(ctx context.Context, inv *CanonicalInvoice, ublXML []byte) (*ClearanceResult, error) {
-	req, err := c.newRequest(ctx, http.MethodPost, c.endpoints.InvoiceUpload,
-		map[string]any{"invoice": inv, "ubl_xml": string(ublXML)})
-	if err != nil {
-		return nil, err
-	}
 	var out struct {
 		Data ClearanceResult `json:"data"`
 	}
-	if err := c.do(req, &out); err != nil {
+	if err := c.doAuthed(ctx, http.MethodPost, c.endpoints.InvoiceUpload,
+		map[string]any{"invoice": inv, "ubl_xml": string(ublXML)}, &out); err != nil {
 		return nil, err
 	}
 	res := out.Data
+	// Fail closed (audit R4): a 2xx with an empty or unknown status is NOT a
+	// clearance — treat it as a rail error so the workflow retries instead of
+	// fabricating a cleared fiscal invoice.
+	switch res.Status {
+	case "cleared", "rejected":
+	default:
+		return nil, fmt.Errorf("nrs preclear: unrecognised rail status %q (fail-closed, no phantom clearance)", res.Status)
+	}
 	if res.IRN == "" {
 		res.IRN = inv.IRN
-	}
-	if res.Status == "" {
-		res.Status = "cleared"
 	}
 	return &res, nil
 }
@@ -289,23 +363,23 @@ func (c *LiveRailClient) Preclear(ctx context.Context, inv *CanonicalInvoice, ub
 // ReportB2C maps a real-time B2C fiscalisation report onto the same NRS
 // invoice upload endpoint (NRS treats B2C reports as real-time submissions).
 func (c *LiveRailClient) ReportB2C(ctx context.Context, inv *CanonicalInvoice) (*B2CReportReceipt, error) {
-	req, err := c.newRequest(ctx, http.MethodPost, c.endpoints.InvoiceUpload,
-		map[string]any{"invoice": inv, "kind": "B2C", "realtime": true})
-	if err != nil {
-		return nil, err
-	}
 	var out struct {
 		Data B2CReportReceipt `json:"data"`
 	}
-	if err := c.do(req, &out); err != nil {
+	if err := c.doAuthed(ctx, http.MethodPost, c.endpoints.InvoiceUpload,
+		map[string]any{"invoice": inv, "kind": "B2C", "realtime": true}, &out); err != nil {
 		return nil, err
 	}
 	rec := out.Data
+	// Fail closed (audit R4): only explicit rail acknowledgements map to
+	// accepted; an empty/unknown status is a rail error, never an acceptance.
+	switch rec.Status {
+	case "accepted", "rejected":
+	default:
+		return nil, fmt.Errorf("nrs b2c report: unrecognised rail status %q (fail-closed)", rec.Status)
+	}
 	if rec.IRN == "" {
 		rec.IRN = inv.IRN
-	}
-	if rec.Status == "" {
-		rec.Status = "accepted"
 	}
 	return &rec, nil
 }
