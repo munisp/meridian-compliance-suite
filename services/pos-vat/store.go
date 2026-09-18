@@ -30,18 +30,22 @@ type Store struct {
 }
 
 type ReconRecord struct {
-	ID             string `json:"id"`
-	Period         string `json:"period"`
-	TenantID       string `json:"tenant_id"`
-	Receipts       int    `json:"receipts"`
-	VATKobo        int64  `json:"vat_kobo"`
-	FederalKobo    int64  `json:"federal_kobo"`
-	StateKobo      int64  `json:"state_kobo"`
-	LGAKobo        int64  `json:"lga_kobo"`
-	Supplement     int    `json:"supplement,omitempty"` // 0 = initial settlement
-	LedgerTransfer string `json:"ledger_transfer_id"`
-	LedgerMode     string `json:"ledger_mode"` // core|dev
-	PostedAt       string `json:"posted_at"`
+	ID          string `json:"id"`
+	Period      string `json:"period"`
+	TenantID    string `json:"tenant_id"`
+	Receipts    int    `json:"receipts"`
+	VATKobo     int64  `json:"vat_kobo"`
+	FederalKobo int64  `json:"federal_kobo"`
+	StateKobo   int64  `json:"state_kobo"`
+	LGAKobo     int64  `json:"lga_kobo"`
+	// Platform-collected leg (audit R4 S1a#8): VAT attributable to receipts
+	// sold through designated platform collectors (remitted by the platform).
+	PlatformCollectedKobo int64  `json:"platform_collected_kobo,omitempty"`
+	PlatformReceipts      int    `json:"platform_receipts,omitempty"`
+	Supplement            int    `json:"supplement,omitempty"` // 0 = initial settlement
+	LedgerTransfer        string `json:"ledger_transfer_id"`
+	LedgerMode            string `json:"ledger_mode"` // core|dev
+	PostedAt              string `json:"posted_at"`
 }
 
 func NewStore(dir string) *Store {
