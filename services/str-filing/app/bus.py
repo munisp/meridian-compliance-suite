@@ -19,7 +19,9 @@ PEP/EDD escalation or sanctions hits):
     }
 
 The consumer delegates to the same intake function as the REST endpoint, so
-idempotency and audit semantics are identical for both paths.
+idempotency and audit semantics are identical for both paths. It also
+consumes ``nrs.aml.ctr.v1`` (currency transaction events from the ledger)
+and routes them to the statutory CTR aggregation pipeline (audit R4 S1b#2).
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ import threading
 log = logging.getLogger("str-filing.bus")
 
 TOPIC = "nrs.aml.str.created"
+TOPICS = (TOPIC, "nrs.aml.ctr.v1")
 
 
 def kafka_enabled() -> bool:
@@ -38,7 +41,7 @@ def kafka_enabled() -> bool:
 
 
 def start_consumer(intake, stop: threading.Event) -> threading.Thread | None:
-    """intake(event_dict, actor) -> (record_dict, created_bool)."""
+    """intake(event_dict, actor, topic) -> (record_dict, created_bool)."""
     if not kafka_enabled():
         log.info("KAFKA_BOOTSTRAP_SERVERS unset; kafka intake disabled "
                  "(HTTP intake only)")
@@ -47,19 +50,23 @@ def start_consumer(intake, stop: threading.Event) -> threading.Thread | None:
 
     def loop():
         consumer = KafkaConsumer(
-            TOPIC,
+            *TOPICS,
             bootstrap_servers=os.environ["KAFKA_BOOTSTRAP_SERVERS"].split(","),
             group_id=os.environ.get("STR_KAFKA_GROUP", "str-filing"),
             enable_auto_commit=False,
             value_deserializer=lambda b: json.loads(b.decode("utf-8")),
             auto_offset_reset="earliest",
         )
-        log.info("consuming %s", TOPIC)
+        log.info("consuming %s", TOPICS)
         while not stop.is_set():
             for msg in consumer.poll(timeout_ms=500).values():
                 for record in msg:
                     try:
-                        intake(record.value, actor="kafka:" + TOPIC)
+                        # Route by topic (audit R4 S1b#2): STR events to the
+                        # STR queue, currency transactions to the statutory
+                        # CTR aggregation pipeline.
+                        intake(record.value, actor="kafka:" + record.topic,
+                               topic=record.topic)
                         consumer.commit()
                     except ValueError as exc:
                         # poison message: commit past it, it can never intake
