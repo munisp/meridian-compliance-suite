@@ -267,7 +267,10 @@ func main() {
 	// through to the JWT/dev middleware unchanged.
 	// OTel (DESIGN-CONTRACT.md): wraps the mux directly so the ServeMux
 	// route template lands on http.route; authz chain is untouched.
-	log.Fatal(httpx.ListenAndServe(":"+port, srv.apiKeyMiddleware(mux, devjwt.Middleware(otelx.Middleware(mux)))))
+	// Both principal paths run through otelx.Middleware (audit R4 S3#17):
+	// previously the X-Api-Key branch bypassed OTel entirely, leaving a whole
+	// route class with no server spans.
+	log.Fatal(httpx.ListenAndServe(":"+port, srv.apiKeyMiddleware(otelx.Middleware(mux), devjwt.Middleware(otelx.Middleware(mux)))))
 }
 
 // handleCreateInvoice ingests via REST/CSV/SAP-OData adapters with

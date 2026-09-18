@@ -234,18 +234,26 @@ func (s *APIKeyStore) Revoke(tenantID, id string) (*APIKey, error) {
 	return k, nil
 }
 
+// usageStampInterval throttles LastUsedAt persistence: the hot auth path
+// stays read-locked, and the JSONL snapshot is rewritten at most once per
+// key per interval (usage stamps are observability metadata, not auth
+// state; key material changes always persist synchronously on mutation).
+const usageStampInterval = time.Minute
+
 // Verify authenticates a presented plaintext key. The digest comparison is
 // constant-time (hmac.Equal) against every candidate sharing the lookup
 // prefix, so timing reveals neither the hash nor whether a prefix exists.
-// On success the key record (with LastUsedAt bumped) is returned.
+// The lookup itself is read-locked (audit R4 S3#17): a full-store write
+// lock + JSONL rewrite per request let any caller serialise all traffic
+// behind disk IO. Only the throttled usage-stamp bump escalates to the
+// write lock.
 func (s *APIKeyStore) Verify(plaintext string) (*APIKey, bool) {
 	if !strings.HasPrefix(plaintext, apiKeyPrefix) || len(plaintext) < len(apiKeyPrefix)+8 {
 		return nil, false
 	}
 	sum := sha256.Sum256([]byte(plaintext))
 	prefix := plaintext[:len(apiKeyPrefix)+8]
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	var matched *APIKey
 	for _, id := range s.byPrefix[prefix] {
 		k := s.byID[id]
@@ -258,26 +266,60 @@ func (s *APIKeyStore) Verify(plaintext string) (*APIKey, bool) {
 		}
 	}
 	if matched == nil || !matched.Active() {
+		s.mu.RUnlock()
 		return nil, false
 	}
-	now := time.Now().UTC()
-	matched.LastUsedAt = &now
-	_ = s.persistLocked() // best-effort usage stamp; auth must not fail on IO
-	return matched, true
+	k := matched
+	s.mu.RUnlock()
+	// Throttled usage stamp: skip the write path entirely when the last
+	// stamp is fresh, so steady-state verification never takes the store
+	// write lock or touches disk.
+	if k.LastUsedAt == nil || time.Since(*k.LastUsedAt) > usageStampInterval {
+		s.mu.Lock()
+		now := time.Now().UTC()
+		k.LastUsedAt = &now
+		_ = s.persistLocked() // best-effort usage stamp; auth must not fail on IO
+		s.mu.Unlock()
+	}
+	return k, true
+}
+
+// apiKeyAllowedPath scopes machine API keys to the invoice/VAT data
+// endpoints they exist for (audit R4 S3#10): a leaked integration key must
+// never grant the key-lifecycle routes (which would allow minting/rotating/
+// revoking keys — persistence + lockout) or any other operator surface.
+func apiKeyAllowedPath(p string) bool {
+	// Hard denial first: key lifecycle always requires an interactive JWT.
+	if p == "/v1/apikeys" || strings.HasPrefix(p, "/v1/apikeys/") {
+		return false
+	}
+	for _, allowed := range []string{"/v1/invoices", "/v1/b2c/", "/v1/vat/"} {
+		if strings.HasPrefix(p, allowed) {
+			return true
+		}
+	}
+	return false
 }
 
 // apiKeyMiddleware accepts X-Api-Key as an alternative principal to the JWT
 // middleware: requests WITH the header are verified against the key store
-// and, on success, served by `authed` (the route mux) carrying an
-// operator-role claim scoped to the key's tenant (used by machine
-// integrations on the invoice-create route). A present-but-invalid key is a
-// 401 — never a silent fallthrough. Requests without the header go through
-// `fallback` (the standard JWT/dev middleware chain) unchanged.
+// and, on success, served by `authed` (the OTel-instrumented route mux)
+// carrying an operator-role claim scoped to the key's tenant — but ONLY for
+// the invoice/VAT data endpoints (apiKeyAllowedPath); every other route is
+// a 403. A present-but-invalid key is a 401 — never a silent fallthrough.
+// Requests without the header go through `fallback` (the standard JWT/dev
+// middleware chain) unchanged.
 func (s *Server) apiKeyMiddleware(authed, fallback http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("X-Api-Key")
 		if key == "" {
 			fallback.ServeHTTP(w, r)
+			return
+		}
+		if !apiKeyAllowedPath(r.URL.Path) {
+			log.Printf("component=einvoicing audit apikey-auth outcome=denied-scope path=%s", r.URL.Path)
+			devjwt.Problem(w, http.StatusForbidden, "forbidden",
+				"API keys are scoped to invoice/VAT endpoints; key lifecycle requires an interactive token")
 			return
 		}
 		k, ok := s.apiKeys.Verify(key)
