@@ -31,7 +31,8 @@ def test_directors_fees_15pct_cites_first_schedule():
     assert cit["statute_sections"] == [
         "wht-regs-2024:first-schedule.directors-fees"]
     assert cit["citation_kind"] == "secondary"  # until CTC verification
-    assert cit["pack_id"] == "rp-wht-2024" and cit["pack_version"] == "1.0.0"
+    # served pack is now 1.1.0 (canonical VAT-exclusive-base pack)
+    assert cit["pack_id"] == "rp-wht-2024" and cit["pack_version"] == "1.1.0"
     # every computed amount maps back to the rules that priced it
     assert "wht.rate.directors-fees.individual" in \
         body["amount_citations"]["wht_kobo"]
@@ -44,7 +45,8 @@ def test_passive_income_no_tin_not_doubled_cites_regs():
     # the response still cites the Regs for the 10% First Schedule rate.
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "dividend", "beneficiary": "company",
-        "amount_kobo": 10_000_000_00, "payment_date": "2026-02-10"})
+        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
+        "payment_date": "2026-02-10"})
     body = r.json()
     assert body["rate_bps"] == 1000
     assert body["no_tin_double_applied"] is False

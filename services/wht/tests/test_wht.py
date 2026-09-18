@@ -18,7 +18,9 @@ H = {"X-Dev-Role": "operator"}
 def test_health_ready():
     assert client.get("/healthz").json()["service"] == "wht"
     r = client.get("/readyz")
-    assert r.status_code == 200 and r.json()["pack"] == "rp-wht-2024@1.0.0"
+    # PackRegistry.load() serves the latest published pack: 1.1.0 (canonical
+    # VAT-exclusive-base pack). Re-pinned from 1.0.0 after that pack landed.
+    assert r.status_code == 200 and r.json()["pack"] == "rp-wht-2024@1.1.0"
 
 
 def test_base_rates_company_vs_individual():
