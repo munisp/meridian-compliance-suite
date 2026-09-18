@@ -50,6 +50,17 @@ class _MemBackend:
         # dict preserves first-insertion order, matching the old in-mem maps
         return [dict(v) for (c, _), v in self._d.items() if c == coll]
 
+    def query(self, coll: str, filters: dict, limit: int) -> list[dict]:
+        out: list[dict] = []
+        for (c, _), v in self._d.items():
+            if c != coll:
+                continue
+            if all(v.get(k) == val for k, val in filters.items()):
+                out.append(dict(v))
+                if len(out) >= limit:
+                    break
+        return out
+
 
 class _PostgresBackend:
     kind = "postgres"
@@ -77,6 +88,18 @@ class _PostgresBackend:
         with self.conn.cursor() as cur:
             cur.execute("SELECT doc FROM filings_docs WHERE collection=%s "
                         "ORDER BY updated_at, id", (coll,))
+            rows = cur.fetchall()
+        return [dict(r[0]) for r in rows]
+
+    def query(self, coll: str, filters: dict, limit: int) -> list[dict]:
+        # Push the equality filter + row bound down to Postgres: JSONB field
+        # extraction is parameterised (filter keys come from code, never
+        # user input, so the ->> key interpolation is a fixed identifier).
+        clauses = " AND ".join(f"doc->>'{k}' = %s" for k in filters)
+        sql = (f"SELECT doc FROM filings_docs WHERE collection=%s AND {clauses} "
+               "ORDER BY updated_at, id LIMIT %s")
+        with self.conn.cursor() as cur:
+            cur.execute(sql, (coll, *filters.values(), limit))
             rows = cur.fetchall()
         return [dict(r[0]) for r in rows]
 
@@ -111,6 +134,14 @@ class DocStore:
 
     def scan(self, collection: str) -> list[dict]:
         return self._b.scan(collection)
+
+    def query(self, collection: str, filters: dict, limit: int) -> list[dict]:
+        """Bounded, filtered read pushed to the backend (audit R4 S3#11):
+        Postgres filters in SQL with LIMIT; the dev backend applies the
+        same contract in memory."""
+        if limit < 1:
+            return []
+        return self._b.query(collection, dict(filters), limit)
 
 
 def max_id_suffix(docs: DocStore, collection: str, id_field: str,
