@@ -419,7 +419,7 @@ rules:
   then:
     deadline_day_of_month: 21
     narrate: WHT deducted on corporate beneficiaries must be remitted to NRS by the 21st day of the following month.
-  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 6
+  citation: WHT Regs 2024, reg. 6
 - id: wht.remittance.deadline-individual
   when:
     tax_authority: SIRS
