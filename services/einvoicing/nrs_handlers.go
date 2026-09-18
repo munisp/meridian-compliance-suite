@@ -78,6 +78,11 @@ func (s *Server) handleNRSCreate(w http.ResponseWriter, r *http.Request) {
 	// Idempotent resubmission: same IRN -> same invoice, no duplicate.
 	if n.IRN != "" {
 		if existing, ok := s.store.GetByIRN(strings.TrimSpace(n.IRN)); ok {
+			// BOLA (audit R4): the replay path must not leak another tenant's
+			// invoice (IRNs are enumerable). Cross-tenant is 404 via the guard.
+			if !tenantGuard(w, r, existing) {
+				return
+			}
 			// FF-6: a mid-flow record (crash before confirmation) is RESUMED,
 			// not returned stale; terminal records replay as before.
 			if nrsInterimStatus(existing) && s.resumeInterrupted(w, r, existing.ID) {
@@ -111,6 +116,11 @@ func (s *Server) handleNRSCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		prior, _ := s.store.Get(priorID)
+		// BOLA (audit R4): idempotency-key replay of another tenant's invoice
+		// must not return its contents or resume its workflow.
+		if !tenantGuard(w, r, prior) {
+			return
+		}
 		// FF-6: resume a mid-flow record on idempotency-key replay.
 		if nrsInterimStatus(prior) && s.resumeInterrupted(w, r, prior.ID) {
 			return
