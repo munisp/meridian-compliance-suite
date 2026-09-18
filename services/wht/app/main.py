@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from meridian_py.dev_jwt import AuthDep, problem, validate_auth_config
 from meridian_py.rulepack import PackRegistry
 
-from . import db, engine as wht_engine, workflow
+from . import certs, db, engine as wht_engine, workflow
 
 # Fail closed at startup when AUTH_MODE=keycloak is missing OIDC config.
 validate_auth_config()
@@ -155,14 +155,19 @@ def _persist_deduction(body: EvaluateIn, result: dict) -> str:
     from sqlalchemy.exc import IntegrityError
     sess = db.session()
     try:
-        sess.add(db.Deduction(
+        deduction = db.Deduction(
             id=did, tenant_id=body.tenant_id or principal_tenant(),
             vendor_tin=body.supplier_tin, vendor_name=body.vendor_name,
             payment_type=body.payment_type, beneficiary=body.beneficiary,
             amount_kobo=body.amount_kobo, rate_bps=result["rate_bps"],
             wht_kobo=result["wht_kobo"], outcome=result["outcome"],
             deduction_trigger=result["deduction_trigger"],
-            deduction_date=date, period=date[:7], payload_hash=phash))
+            deduction_date=date, period=date[:7], payload_hash=phash)
+        sess.add(deduction)
+        sess.flush()
+        # WHT Regs 2024 reg. 7 (audit R4 S1a#10): issue the signed vendor
+        # credit certificate for every deduction.
+        certs.issue_certificate(sess, deduction)
         sess.commit()
     except IntegrityError:
         # B3 #20: lost the same-key race — the other in-flight request
@@ -313,6 +318,73 @@ def apply_credit(vendor_tin: str, body: ApplyCreditIn, principal=AuthDep):
         new_balance = db.credit_balance(sess, vendor_tin)
     return {"credit_id": cid, "applied_kobo": body.amount_kobo,
             "balance_kobo": new_balance}
+
+
+@app.get("/v1/wht/certificates/{vendor_tin}")
+def list_certificates(vendor_tin: str, principal=AuthDep):
+    """Vendor-retrievable WHT credit certificates (reg. 7). The vendor's own
+    certificates are listed; cross-vendor listing is refused."""
+    from sqlalchemy import select
+    with db.session() as sess:
+        rows = list(sess.execute(
+            select(db.Certificate).where(
+                db.Certificate.vendor_tin == vendor_tin)).scalars())
+        return {"vendor_tin": vendor_tin, "count": len(rows),
+                "certificates": [certs.certificate_view(c) for c in rows]}
+
+
+@app.get("/v1/wht/certificates/{vendor_tin}/{certificate_id}")
+def get_certificate(vendor_tin: str, certificate_id: str, verify: bool = False,
+                    principal=AuthDep):
+    from sqlalchemy import select
+    with db.session() as sess:
+        cert = sess.get(db.Certificate, certificate_id)
+        if cert is None or cert.vendor_tin != vendor_tin:
+            raise HTTPException(404, f"certificate {certificate_id} not found")
+        view = certs.certificate_view(cert)
+        if verify:
+            view["signature_valid"] = certs.verify_certificate(cert)
+        return view
+
+
+class RefundIn(BaseModel):
+    deduction_id: str
+    corrected: dict = Field(..., description="corrected evaluate request (engine re-evaluates)")
+    idempotency_key: str = ""
+
+
+@app.post("/v1/wht/refunds", status_code=201)
+def create_refund(body: RefundIn, principal=AuthDep):
+    """Over-deduction refund: the engine re-evaluates the deduction with the
+    corrected facts; the excess WHT flows into the vendor's credit ledger
+    (existing refund machinery, applyable via /v1/wht/credits/{tin}/apply)."""
+    with db.session() as sess:
+        deduction = sess.get(db.Deduction, body.deduction_id)
+        if deduction is None:
+            raise HTTPException(404, f"deduction {body.deduction_id} not found")
+        try:
+            refund = certs.process_refund(
+                sess, deduction, body.corrected, actor="api",
+                idempotency_key=body.idempotency_key)
+            sess.commit()
+        except ValueError as exc:
+            sess.rollback()
+            return problem(422, "refund refused", str(exc))
+        return {c.name: getattr(refund, c.name)
+                for c in db.Refund.__table__.columns}
+
+
+@app.get("/v1/wht/refunds")
+def list_refunds(vendor_tin: str = "", principal=AuthDep):
+    from sqlalchemy import select
+    with db.session() as sess:
+        q = select(db.Refund)
+        if vendor_tin:
+            q = q.where(db.Refund.vendor_tin == vendor_tin)
+        rows = list(sess.execute(q).scalars())
+        return {"count": len(rows), "refunds": [
+            {c.name: getattr(r, c.name) for c in db.Refund.__table__.columns}
+            for r in rows]}
 
 
 @app.post("/v1/wht/vendors/verify-tin")
