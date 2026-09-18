@@ -157,16 +157,21 @@ def export_taxpromax(tin: str, from_period: str | None = None,
     export is audit-logged."""
     authz.require_tin_scope(principal, tin)
     try:
-        rows = taxpromax.collect_rows(vat_store, paye_store, tin,
-                                      from_period, to_period, tax_type)
+        rows, truncated = taxpromax.collect_rows(vat_store, paye_store, tin,
+                                                 from_period, to_period, tax_type)
     except ValueError as e:
         _err(e, status=400)
     taxpromax.audit_export(vat_store._docs, principal.sub, tin,
                            from_period, to_period, tax_type, len(rows))
+    headers = {"Content-Disposition":
+               f'attachment; filename="taxpromax_{tin}.csv"'}
+    if truncated:
+        # Honest signal that the export hit the bounded row cap; narrow the
+        # period range or split by tax_type for the remainder.
+        headers["X-Export-Truncated"] = "true"
     return StreamingResponse(
         taxpromax.stream_csv(rows), media_type="text/csv",
-        headers={"Content-Disposition":
-                 f'attachment; filename="taxpromax_{tin}.csv"'})
+        headers=headers)
 
 
 # ---------- F4 assessments & objections ----------

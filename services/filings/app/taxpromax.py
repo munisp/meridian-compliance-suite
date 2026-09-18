@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import logging
 import time
 from decimal import ROUND_HALF_UP, Decimal
@@ -65,10 +66,25 @@ def _in_range(period: str, from_period: str | None, to_period: str | None) -> bo
     return True
 
 
+# Row cap per export (audit R4 S3#11): an export request previously scanned
+# ALL tenants' returns and materialised the full row list in memory — a
+# cheap O(DB-size) CPU/memory amplifier. The per-tenant filter is now
+# pushed into the store and the result is bounded.
+EXPORT_MAX_ROWS = int(os.environ.get("TAXPROMAX_EXPORT_MAX_ROWS", "10000"))
+
+
 def collect_rows(vat_store, paye_store, tin: str,
                  from_period: str | None = None, to_period: str | None = None,
-                 tax_type: str | None = None) -> list[list[str]]:
-    """Materialise export rows for one TIN, newest stores win per period."""
+                 tax_type: str | None = None,
+                 max_rows: int | None = None) -> tuple[list[list[str]], bool]:
+    """Materialise export rows for one TIN, newest stores win per period.
+    Returns (rows, truncated): the per-tenant query is pushed into the store
+    and bounded at max_rows+1 so truncation is detected without an unbounded
+    read."""
+    if max_rows is None:
+        max_rows = EXPORT_MAX_ROWS
+    if max_rows < 1:
+        max_rows = 1
     if from_period:
         parse_period(from_period)
     if to_period:
@@ -78,11 +94,14 @@ def collect_rows(vat_store, paye_store, tin: str,
         if t not in TAX_TYPES:
             raise ValueError(f"unknown tax_type {tax_type!r}; expected VAT|PAYE")
 
+    truncated = False
     rows: list[list[str]] = []
     if "VAT" in wanted:
-        for rec in vat_store._docs.scan("vat_returns"):
-            if rec.get("tin") != tin:
-                continue
+        recs = vat_store._docs.query("vat_returns", {"tin": tin}, max_rows + 1)
+        if len(recs) > max_rows:
+            truncated = True
+            recs = recs[:max_rows]
+        for rec in recs:
             if not _in_range(rec["period"], from_period, to_period):
                 continue
             rows.append([
@@ -98,9 +117,11 @@ def collect_rows(vat_store, paye_store, tin: str,
                 rec["status"],
             ])
     if "PAYE" in wanted:
-        for rec in paye_store._docs.scan("paye_returns"):
-            if rec.get("employer_tin") != tin:
-                continue
+        recs = paye_store._docs.query("paye_returns", {"employer_tin": tin}, max_rows + 1)
+        if len(recs) > max_rows:
+            truncated = True
+            recs = recs[:max_rows]
+        for rec in recs:
             if not _in_range(rec["period"], from_period, to_period):
                 continue
             rows.append([
@@ -116,7 +137,7 @@ def collect_rows(vat_store, paye_store, tin: str,
                 rec["status"],
             ])
     rows.sort(key=lambda r: (r[2], r[3]))  # period, tax type
-    return rows
+    return rows, truncated
 
 
 def stream_csv(rows: Iterable[list[str]]) -> Iterator[str]:
