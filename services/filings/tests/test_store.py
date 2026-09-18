@@ -56,7 +56,12 @@ def test_assessment_lifecycle_survives_reinstantiation():
     dec = s2.decide(obj["objection_id"], "rejected", served + timedelta(days=20))
     assert dec["status"] == "rejected"
     s3 = assessment.AssessmentStore(docs)
-    assert s3.get(a["assessment_id"])["status"] == "final_and_conclusive"
+    # A rejected objection is appealable (30-day TAT window), not final; it
+    # finalises only after the window lapses (audit R4 S1b#11).
+    assert s3.get(a["assessment_id"])["status"] == "appealable"
+    s3.tick(served + timedelta(days=20 + 31))
+    s4 = assessment.AssessmentStore(docs)
+    assert s4.get(a["assessment_id"])["status"] == "final_and_conclusive"
 
 
 def test_tick_and_tat_referrals_durable():
