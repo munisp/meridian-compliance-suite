@@ -260,6 +260,10 @@ def build_context(req: dict) -> dict:
         ctx["goods_origin"] = "imported"
     if req.get("franked_investment_income"):
         ctx["franked_investment_income"] = True
+    # VAT-inclusive invoice (audit R4 S1a#5): signals the pack rule
+    # wht.base.vat-exclusive so the WHT base is the net-of-VAT consideration.
+    if req.get("includes_vat"):
+        ctx["includes_vat"] = True
     if req.get("source"):
         ctx["source"] = req["source"]  # winnings: lottery | gaming | reality_show
     if req.get("construction_type"):
@@ -350,7 +354,21 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
                "deduct_no_tin_double" if doubled else
                "deduct" if rate_rule_matched else "no_applicable_rule")
 
-    wht_kobo = round_half_up_kobo(amount, rate)
+    # WHT base (audit R4 S1a#5): VAT is a pass-through tax, not income — when
+    # the invoice has a VAT component the base is the net-of-VAT consideration
+    # (FIRS practice), enforced only when the pack carries the governing rule.
+    wht_base = amount
+    vat_kobo = 0
+    if "wht.base.vat-exclusive" in matched:
+        vat_kobo = int(req.get("vat_kobo") or 0)
+        if vat_kobo <= 0:
+            raise ValueError(
+                "includes_vat requires a positive vat_kobo (VAT-exclusive base per pack rule wht.base.vat-exclusive)")
+        if vat_kobo >= amount:
+            raise ValueError("vat_kobo must be less than amount_kobo")
+        wht_base = amount - vat_kobo
+
+    wht_kobo = round_half_up_kobo(wht_base, rate)
     # Deduction date: earlier of payment / settlement (Reg 3)
     dates = [d for d in (req.get("payment_date"), req.get("settlement_date")) if d]
     trigger_date = min(dates) if dates else (ctx.get("date") or "")
@@ -374,6 +392,8 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
         "subject_to_regazette": True,
         "as_of_date": as_of or "",
         "amount_kobo": amount,
+        "wht_base_kobo": wht_base,
+        "vat_kobo": vat_kobo,
         "rate_bps": rate,
         "base_rate_bps": base_rate,
         "wht_kobo": wht_kobo,

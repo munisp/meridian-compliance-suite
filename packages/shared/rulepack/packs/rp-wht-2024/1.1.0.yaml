@@ -1,0 +1,441 @@
+# rp-wht-2024 v1.1.0 — Meridian rule pack (SPEC §1.4 format)
+# Deduction of Tax at Source (Withholding) Regulations 2024
+id: rp-wht-2024
+version: 1.1.0
+title: Deduction of Tax at Source (Withholding) Regulations 2024
+description: 'Full WHT rule set: rates per payment type and beneficiary class, deduction timing (earlier of payment or settlement),
+  no-TIN double rate, small-company carve-out, NIN-acceptable identity, exemptions (direct debit, broker, imported/manufactured
+  goods, franked investment income), remittance deadline.'
+effective_from: '2025-01-01'
+effective_to: null
+status: published
+subject_to_regazette: true
+provenance:
+  as_passed: Deduction of Tax at Source (Withholding) Regulations 2024, signed 1 July 2024 (FIRS/FMoF)
+  as_gazetted: Federal Republic of Nigeria Official Gazette No. 106, Vol. 111 of 2024 (awaiting CTC confirmation)
+  source_citation: Deduction of Tax at Source (Withholding) Regulations 2024
+parameters:
+  small_company_monthly_turnover_cap_kobo: 200000000
+  no_tin_multiplier_bps: 20000
+rules:
+- id: wht.trigger.due-date
+  when:
+    payment_event:
+      in:
+      - payment
+      - settlement
+      - credit_to_account
+  then:
+    decision: deduct_at_earlier_of_payment_or_settlement
+    narrate: Deduction arises on the earlier of when payment is made or the amount due is settled, credited, or otherwise
+      dealt with.
+  citation: WHT Regs 2024, reg. 3
+- id: wht.rate.dividend.company
+  when:
+    payment_type: dividend
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on dividends to a company
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.dividend.individual
+  when:
+    payment_type: dividend
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on dividends to an individual
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.interest.company
+  when:
+    payment_type: interest
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on interest to a company
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.interest.individual
+  when:
+    payment_type: interest
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on interest to an individual
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.rent.company
+  when:
+    payment_type: rent
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on rent to a company
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.rent.individual
+  when:
+    payment_type: rent
+    beneficiary: individual
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on rent to an individual
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.royalty.company
+  when:
+    payment_type: royalty
+    beneficiary: company
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on royalties to a company
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.royalty.individual
+  when:
+    payment_type: royalty
+    beneficiary: individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on royalties to an individual
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.goods-supply.any
+  when:
+    payment_type: supply_of_goods_materials
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 200
+    narrate: WHT 2% on supply of goods and materials
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.construction.core
+  when:
+    payment_type: construction
+    construction_type:
+      in: &id001
+      - roads
+      - bridges
+      - buildings
+      - power_plants
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 200
+    narrate: WHT 2% (resident) on construction of roads, bridges, buildings and power plants.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table)
+- id: wht.rate.construction.other
+  when:
+    payment_type: construction
+    construction_type: other
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% (resident) on any other form of construction and related activities.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; Nexia)
+- id: wht.rate.construction.non-resident.core
+  when:
+    payment_type: construction
+    construction_type:
+      in: *id001
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 500
+    precedence: 10
+    narrate: WHT 5% (non-resident) on construction of roads, bridges, buildings and power plants.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; Aluko & Oyebode)
+- id: wht.rate.construction.non-resident.other
+  when:
+    payment_type: construction
+    construction_type: other
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 1000
+    precedence: 10
+    narrate: WHT 10% (non-resident) on any other form of construction and related activities.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; Aluko & Oyebode)
+- id: wht.rate.services.company
+  when:
+    payment_type:
+      in:
+      - consultancy
+      - professional
+      - technical
+      - management
+    beneficiary: company
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on consultancy/professional/technical/management services to a resident company.
+  citation: WHT Regs 2024, First Schedule
+- id: wht.rate.other-services.company
+  when:
+    payment_type: services
+    beneficiary: company
+  then:
+    rate_bps: 200
+    narrate: WHT 2% (resident) on supply or rendering of services OTHER THAN those specifically listed in the First Schedule
+      (generic "other services").
+  citation: WHT Regs 2024, First Schedule row "services other than those specifically listed" (KPMG; AELEX; Reanda)
+- id: wht.rate.services.individual
+  when:
+    payment_type:
+      in:
+      - consultancy
+      - professional
+      - technical
+      - management
+    beneficiary: individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on consultancy/professional/technical/management services to a resident individual.
+  citation: WHT Regs 2024, First Schedule
+- id: wht.rate.other-services.individual
+  when:
+    payment_type: services
+    beneficiary: individual
+  then:
+    rate_bps: 200
+    narrate: WHT 2% (resident) on supply or rendering of services OTHER THAN those specifically listed in the First Schedule
+      (generic "other services").
+  citation: WHT Regs 2024, First Schedule row "services other than those specifically listed" (KPMG; AELEX; Reanda)
+- id: wht.rate.commission.any
+  when:
+    payment_type: commission
+    beneficiary:
+      in:
+      - company
+      - individual
+  then:
+    rate_bps: 500
+    narrate: WHT 5% on commission
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, First Schedule
+- id: wht.rate.directors-fees.individual
+  when:
+    payment_type: directors_fees
+    beneficiary: individual
+  then:
+    rate_bps: 1500
+    narrate: WHT 15% on directors' fees to a resident individual (raised from 10% by the WHT Regulations 2024).
+  citation: WHT Regs 2024, First Schedule (KPMG rate table; UUBO; Aluko & Oyebode)
+  effective_from: '2025-01-01'
+- id: wht.rate.directors-fees.non-resident
+  when:
+    payment_type: directors_fees
+    beneficiary: individual
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 2000
+    precedence: 10
+    narrate: WHT 20% on directors' fees to a non-resident individual (final tax).
+  citation: WHT Regs 2024, First Schedule (KPMG rate table — Directors' fees non-corp 15%/20%; SHQ Legal)
+  effective_from: '2025-01-01'
+- id: wht.rate.non-resident.standard
+  when:
+    beneficiary_residence: non_resident
+    payment_type:
+      in:
+      - dividend
+      - interest
+      - rent
+      - consultancy
+      - professional
+      - technical
+      - management
+      - commission
+  then:
+    rate_bps: 1000
+    narrate: WHT 10% on payments to non-resident recipients (final tax; treaty relief may reduce)
+  citation: WHT Regs 2024, First Schedule
+- id: wht.rate.royalty.non-resident-company
+  when:
+    payment_type: royalty
+    beneficiary: company
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 1000
+    precedence: 10
+    narrate: WHT 10% on royalties to a non-resident company (final tax; treaty relief may reduce).
+  citation: WHT Regs 2024, First Schedule (KPMG rate table)
+- id: wht.rate.royalty.non-resident-individual
+  when:
+    payment_type: royalty
+    beneficiary: individual
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 500
+    precedence: 20
+    narrate: WHT 5% on royalty payments to individuals, resident OR non-resident — the 10% non-resident rate does NOT apply
+      to individuals. Explicit precedence prevents the generic non-resident rule from clobbering the individual rate under
+      last-match-wins merge.
+  citation: WHT Regs 2024, First Schedule (KPMG rate table — Royalty non-corp 5%/5%; UUBO; SHQ Legal)
+- id: wht.rate.other-services.non-resident
+  when:
+    payment_type: services
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 500
+    precedence: 10
+    narrate: WHT 5% (non-resident) on supply or rendering of services OTHER THAN those specifically listed.
+  citation: 'WHT Regs 2024, First Schedule row "services other than those specifically listed: 2%/5%" (KPMG)'
+- id: wht.base.vat-exclusive
+  when:
+    includes_vat: true
+  then:
+    wht_base: net_of_vat
+    narrate: 'VAT is a pass-through tax, not income: the WHT base is the net-of-VAT consideration (FIRS practice); engine
+      deducts on amount_kobo minus vat_kobo'
+- id: wht.no-tin.double-rate
+  when:
+    supplier_tin: null
+    supplier_nin: null
+    payment_type:
+      not_in:
+      - dividend
+      - interest
+      - royalty
+      - rent
+  then:
+    rate_multiplier_bps: 20000
+    narrate: 'Rate is DOUBLED where the supplier has no TIN (and no NIN for individuals). Scope: ACTIVE income only — the
+      double rate does NOT apply to passive income (dividends, interest, royalty, rent).'
+  citation: WHT Regs 2024, reg. 5; PwC Nigeria WHT summary (double rate not applicable to passive income, e.g. dividends)
+- id: wht.identity.nin-acceptable
+  when:
+    beneficiary: individual
+    supplier_nin:
+      present: true
+  then:
+    decision: identity_satisfied
+    narrate: NIN is acceptable in lieu of TIN as supplier identity for individuals.
+  citation: WHT Regs 2024, reg. 5(2)
+- id: wht.small-co.carveout
+  when:
+    payer_size: small
+    payer_annual_turnover_kobo:
+      lte: 2500000000
+    transaction_month_value_kobo:
+      lte: 200000000
+    supplier_tin:
+      present: true
+  then:
+    rate_bps: 0
+    precedence: 30
+    narrate: No deduction where the PAYER is a small company (turnover not exceeding N25,000,000 p.a. per the small-company
+      definition cross-referenced by the Regs), the transaction value does not exceed N2,000,000 in the relevant calendar
+      month, AND the supplier has a valid TIN. The carve-out is NEVER granted without a supplier TIN.
+  citation: WHT Regs 2024, reg. 4 (SHQ Legal; Andersen; PwC WHT summary — transaction value < N2m and vendor has valid TIN)
+- id: wht.exempt.franked-investment-income
+  when:
+    payment_type: dividend
+    franked_investment_income: true
+  then:
+    rate_bps: 0
+    narrate: No WHT on franked investment income redistributed.
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.exempt.direct-debit
+  when:
+    payment_channel: direct_debit
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: payments made by direct debit from the payer''s bank account.'
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.exempt.broker-securities
+  when:
+    payment_channel: broker
+    instrument: securities
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: securities transactions settled through a broker/dealer.'
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.exempt.imported-goods
+  when:
+    payment_type: supply_of_goods_materials
+    goods_origin: imported
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: imported goods where the margin does not represent services performed in Nigeria.'
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.exempt.manufactured-goods
+  when:
+    payment_type: supply_of_goods_materials
+    supplier_role: manufacturer_or_producer
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: goods manufactured or produced by the supplier.'
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.exempt.telephone-airline
+  when:
+    payment_type:
+      in:
+      - telephone_charges
+      - airline_ticket
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: telephone charges and airline tickets.'
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.rate.winnings.resident
+  when:
+    payment_type: winnings
+    source:
+      in: &id002
+      - lottery
+      - gaming
+      - reality_show
+  then:
+    rate_bps: 500
+    narrate: WHT 5% (resident) on winnings from lottery, gaming and reality shows — NOT exempt; the former "taxed under dedicated
+      regimes" carve-out was removed.
+  citation: WHT Regs 2024, First Schedule (KPMG; AELEX; Andersen; SHQ Legal) — effective 1 Oct 2024
+  effective_from: '2024-10-01'
+- id: wht.rate.winnings.non-resident
+  when:
+    payment_type: winnings
+    source:
+      in: *id002
+    beneficiary_residence: non_resident
+  then:
+    rate_bps: 1500
+    precedence: 10
+    narrate: WHT 15% (non-resident) on winnings from lottery, gaming and reality shows.
+  citation: WHT Regs 2024, First Schedule (KPMG; AELEX; Andersen; SHQ Legal) — effective 1 Oct 2024
+  effective_from: '2024-10-01'
+- id: wht.exempt.lpg-cng
+  when:
+    payment_type: supply_of_goods_materials
+    goods:
+      in:
+      - lpg
+      - cng
+      - renewable_energy_equipment
+  then:
+    rate_bps: 0
+    narrate: 'Exempt: LPG, CNG and renewable energy equipment.'
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 4
+- id: wht.remittance.deadline-company
+  when:
+    payer: company
+    tax_authority: NRS
+  then:
+    deadline_day_of_month: 21
+    narrate: WHT deducted on corporate beneficiaries must be remitted to NRS by the 21st day of the following month.
+  citation: WHT Regs 2024, reg. 6
+- id: wht.remittance.deadline-individual
+  when:
+    tax_authority: SIRS
+  then:
+    deadline_day_of_month: 30
+    narrate: WHT deducted on individuals remitted to the relevant State IRS by the 30th day of the following month.
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 6
+- id: wht.credit.receipt
+  when:
+    deducted: true
+  then:
+    decision: issue_credit_note
+    narrate: Deducting agent must issue a WHT credit note/receipt; WHT credit is available to the beneficiary against its
+      tax liability.
+  citation: Deduction of Tax at Source (Withholding) Regulations 2024, reg. 7
+signed:
+  algorithm: ed25519
+  key_id: governance-board-2026
+  signature: 376d0a1de2cbd0612b64e6ca87821cd7f98e9166e1bb227ad4993dff21276ba343659c5af35bd6df682d4c28f69939d7a0e14a25422c574aa9269f870e78b30b
