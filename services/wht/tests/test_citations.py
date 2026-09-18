@@ -45,8 +45,7 @@ def test_passive_income_no_tin_not_doubled_cites_regs():
     # the response still cites the Regs for the 10% First Schedule rate.
     r = client.post("/v1/wht/evaluate", headers=H, json={
         "payment_type": "dividend", "beneficiary": "company",
-        "amount_kobo": 10_000_000_00, "supplier_tin": "1234567890123",
-        "payment_date": "2026-02-10"})
+        "amount_kobo": 10_000_000_00, "payment_date": "2026-02-10"})
     body = r.json()
     assert body["rate_bps"] == 1000
     assert body["no_tin_double_applied"] is False
