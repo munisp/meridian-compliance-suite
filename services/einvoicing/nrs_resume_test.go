@@ -32,7 +32,7 @@ func TestNRSResumeOnRetryAfterMidFlowCrash(t *testing.T) {
 	sink := &InprocWebhookSink{}
 	srv1, mux1 := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
-	n.IRN = "INVRES1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVRES1")
 	if err := srv1.webhooks.Register(n.BusinessID, "tenant-test", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestNRSRecoverySweepConfirmsInterrupted(t *testing.T) {
 	dir := t.TempDir()
 	srv1, mux1 := newNRSTestServerAt(t, dir, &InprocWebhookSink{})
 	n := sampleNRSPayload()
-	n.IRN = "INVSWP1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVSWP1")
 	if err := srv1.webhooks.Register(n.BusinessID, "tenant-test", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
@@ -161,10 +161,10 @@ func TestNRSInterimStatusClassification(t *testing.T) {
 		{"signed", "{}", true},
 		{"transmitted", "{}", true},
 		{"confirmed", "{}", false},
-		{"failed", "{}", false},     // explicit retry-exhausted outcome
-		{"signed", "", false},       // not NRS-flow
-		{"precleared", "", false},   // MBS flow
-		{"", "{}", false},           // defensive: unknown status
+		{"failed", "{}", false},   // explicit retry-exhausted outcome
+		{"signed", "", false},     // not NRS-flow
+		{"precleared", "", false}, // MBS flow
+		{"", "{}", false},         // defensive: unknown status
 	}
 	for i, tc := range cases {
 		inv := &CanonicalInvoice{Status: tc.status, NRSPayload: tc.payload}

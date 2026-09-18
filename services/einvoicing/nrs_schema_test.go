@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sampleNRSPayload() NRSInvoice {
 	return NRSInvoice{
 		BusinessID:           "biz-acme",
-		IssueDate:            "2026-01-27",
-		DueDate:              "2026-02-27",
+		IssueDate:            time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02"),
+		DueDate:              time.Now().UTC().AddDate(0, 0, 30).Format("2006-01-02"),
 		InvoiceTypeCode:      "380",
 		DocumentCurrencyCode: "NGN",
 		InvoiceKind:          "B2B",
