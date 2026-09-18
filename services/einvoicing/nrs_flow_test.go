@@ -44,6 +44,13 @@ func newNRSTestServer(t *testing.T) (*Server, *InprocWebhookSink, http.Handler) 
 	return srv, sink, mux
 }
 
+// datedTestIRN builds an explicit IRN whose date stamp matches the sample
+// payload's issue date (the workflow validates IRN-date vs issue_date).
+func datedTestIRN(prefix string) string {
+	ds, _ := DateStamp(sampleNRSPayload().IssueDate)
+	return prefix + "-94ND90NR-" + ds
+}
+
 func postNRS(t *testing.T, mux http.Handler, n NRSInvoice) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(n)
@@ -80,7 +87,8 @@ func TestNRSHappyPathEightSteps(t *testing.T) {
 		t.Fatalf("bad irn %q", resp.IRN)
 	}
 	num, sid, ds, _ := ParseIRN(resp.IRN)
-	if num != "INV0001" || !ValidServiceID(sid) || ds != "20260127" {
+	wantDS, _ := DateStamp(sampleNRSPayload().IssueDate)
+	if num != "INV0001" || !ValidServiceID(sid) || ds != wantDS {
 		t.Fatalf("irn parts %q %q %q", num, sid, ds)
 	}
 	if resp.Status != "confirmed" {
@@ -107,14 +115,14 @@ func TestNRSHappyPathEightSteps(t *testing.T) {
 func TestNRSClientSuppliedIRNSkipsGeneration(t *testing.T) {
 	_, _, mux := newNRSTestServer(t)
 	n := sampleNRSPayload()
-	n.IRN = "INV0001-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INV0001")
 	rec := postNRS(t, mux, n)
 	if rec.Code != 201 {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
 	}
 	var resp nrsAPIResponse
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if resp.IRN != "INV0001-94ND90NR-20260127" {
+	if resp.IRN != datedTestIRN("INV0001") {
 		t.Fatalf("irn=%s", resp.IRN)
 	}
 	if !strings.Contains(resp.Steps[1].Detail, "skipped") {
@@ -125,7 +133,7 @@ func TestNRSClientSuppliedIRNSkipsGeneration(t *testing.T) {
 func TestNRSIdempotentResubmit(t *testing.T) {
 	srv, _, mux := newNRSTestServer(t)
 	n := sampleNRSPayload()
-	n.IRN = "INV0001-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INV0001")
 	rec1 := postNRS(t, mux, n)
 	if rec1.Code != 201 {
 		t.Fatalf("first: %d %s", rec1.Code, rec1.Body)
@@ -262,7 +270,7 @@ func TestNRSUpdateInvalidStatus(t *testing.T) {
 
 func TestNRSUpdateNotFound(t *testing.T) {
 	_, _, mux := newNRSTestServer(t)
-	rec := patch(t, mux, "NOPE-94ND90NR-20260127", map[string]string{"payment_status": "PAID"})
+	rec := patch(t, mux, datedTestIRN("NOPE"), map[string]string{"payment_status": "PAID"})
 	if rec.Code != 404 {
 		t.Fatalf("code=%d", rec.Code)
 	}

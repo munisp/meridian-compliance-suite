@@ -96,7 +96,7 @@ func TestNRSTransmitAmbiguityReconverges(t *testing.T) {
 	srv, mux := newNRSTestServerAt(t, dir, nil)
 	srv.webhooks = NewWebhookRegistry(sink)
 	n := sampleNRSPayload()
-	n.IRN = "INVAMB1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVAMB1")
 	if err := srv.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestNRSConnectionResetMidCall(t *testing.T) {
 	sink := &InprocWebhookSink{Fail: errSimConnReset}
 	srv, mux := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
-	n.IRN = "INVRST1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVRST1")
 	if err := srv.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestNRSCrashBeforeCommit(t *testing.T) {
 		return nil
 	})
 	n := sampleNRSPayload()
-	n.IRN = "INVKBC1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVKBC1")
 	rec := postNRS(t, mux, n)
 	if rec.Code != 500 {
 		t.Fatalf("expected 500 on pre-commit db fault, got %d %s", rec.Code, rec.Body)
@@ -204,7 +204,7 @@ func TestNRSCrashAfterProviderEffectBeforePersist(t *testing.T) {
 	sink := &InprocWebhookSink{}
 	srv, mux := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
-	n.IRN = "INVKAP1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVKAP1")
 	if err := srv.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestNRSDelayedRestartRecovery(t *testing.T) {
 	sink := &InprocWebhookSink{Fail: errSimConnReset}
 	srv1, mux1 := newNRSTestServerAt(t, dir, sink)
 	n := sampleNRSPayload()
-	n.IRN = "INVDLY1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVDLY1")
 	if err := srv1.webhooks.Register(n.BusinessID, "tenant-a", "https://stakeholder/hook", "sekret"); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestNRSReconciliationReplay(t *testing.T) {
 	dir := t.TempDir()
 	srv, mux := newNRSTestServerAt(t, dir, nil)
 	n := sampleNRSPayload()
-	n.IRN = "INVREC1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVREC1")
 	rec := postNRS(t, mux, n)
 	if rec.Code != 201 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
@@ -350,7 +350,7 @@ func TestNRSDbTimeoutOnStateWrite(t *testing.T) {
 		return nil
 	})
 	n := sampleNRSPayload()
-	n.IRN = "INVDBT1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVDBT1")
 	rec := postNRS(t, mux, n)
 	if rec.Code == 201 {
 		t.Fatalf("expected failure under db timeout, got 201")
@@ -378,7 +378,7 @@ func TestNRSDbDeadlockOnStateWrite(t *testing.T) {
 		return nil
 	})
 	n := sampleNRSPayload()
-	n.IRN = "INVDBL1-94ND90NR-20260127"
+	n.IRN = datedTestIRN("INVDBL1")
 	rec := postNRS(t, mux, n)
 	if rec.Code == 201 {
 		t.Fatalf("expected failure under deadlock, got 201")
