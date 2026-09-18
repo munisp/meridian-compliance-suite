@@ -49,6 +49,36 @@ class Deduction(Base):
     )
 
 
+class Certificate(Base):
+    """WHT Regs 2024 reg. 7 credit note: one signed certificate per
+    deduction, vendor-retrievable (audit R4 S1a#10)."""
+    __tablename__ = "wht_certificates"
+    id = Column(String, primary_key=True)
+    deduction_id = Column(String, unique=True, index=True)
+    tenant_id = Column(String, default="", index=True)
+    vendor_tin = Column(String, index=True)
+    payload = Column(String, default="{}")     # canonical JSON
+    signature = Column(String, default="")     # HMAC-SHA256 over payload
+    issued_at = Column(String, default="")
+
+
+class Refund(Base):
+    """Over-deduction refund: excess WHT credited into the vendor credit
+    ledger (existing refund machinery)."""
+    __tablename__ = "wht_refunds"
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String, default="", index=True)
+    deduction_id = Column(String, index=True)
+    vendor_tin = Column(String, index=True)
+    deducted_wht_kobo = Column(BigInteger)
+    corrected_wht_kobo = Column(BigInteger)
+    over_deducted_kobo = Column(BigInteger)
+    credit_id = Column(String, default="")
+    status = Column(String, default="credited")
+    created_by = Column(String, default="")
+    created_at = Column(String, default="")
+
+
 class Credit(Base):
     __tablename__ = "wht_credits"
     id = Column(String, primary_key=True)
