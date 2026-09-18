@@ -388,7 +388,7 @@ func (ps *PackSet) LoadPacks() {
 			continue
 		}
 		if raw, ok := embeddedPacks[id]; ok {
-			p, err := packFromYAML(id, raw)
+			p, err := packFromYAML(id, []byte(raw))
 			if err == nil {
 				ps.mu.Lock()
 				ps.packs[id] = p
@@ -398,14 +398,14 @@ func (ps *PackSet) LoadPacks() {
 			}
 			logm("error", "embedded pack "+id+" failed: "+err.Error())
 		}
-		if ps.cfg.Profile == "prod" {
+		if ps.cfg.AuthMode == "prod" {
 			logm("error", "pack "+id+" unavailable in prod (fail-closed)")
 		}
 	}
 }
 
 func (ps *PackSet) fetchFromRegistry(id string) *RulePack {
-	base := ps.cfg.RulePackRegistryURL
+	base := ps.cfg.RegistryURL
 	if base == "" {
 		return nil
 	}
@@ -422,7 +422,7 @@ func (ps *PackSet) fetchFromRegistry(id string) *RulePack {
 		Content string `json:"content"` // raw YAML (registry is the source of truth)
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err := json.Unmarshal(body, &payload); err != nil || payload.Content == "" {
+	if err := jsonUnmarshal(body, &payload); err != nil || payload.Content == "" {
 		return nil
 	}
 	p, err := packFromYAML(id, []byte(payload.Content))
@@ -644,4 +644,94 @@ func tinPrefix(tin string) string {
 		return tin[:4]
 	}
 	return tin
+}
+
+// ---------- R4 build repair: compatibility surface restored after the ----------
+// Pack->RulePack refactor in #58 (handlers.go/citations.go still reference it).
+
+// Pack is the pre-#58 name for a rule pack; kept as an alias so existing
+// call-sites (citations.go) keep working.
+type Pack = RulePack
+
+// packOrder is the deterministic load/render order of the embedded packs
+// (pre-#58 this was vatPackIDs; recovered from 539dd8e^:packs.go).
+var packOrder = []string{
+	"rp-vat-rates", "rp-vat-exempt-basket", "rp-vat-zerorated-basket",
+	"rp-vat-attribution-mode", "rp-platform-collectors",
+}
+
+// VersionTag returns "rp-a@1.0.0,rp-b@1.0.0" for envelopes (= VersionString).
+func (ps *PackSet) VersionTag() string { return ps.VersionString() }
+
+// BasketFor classifies a line category into standard_75|zero_rated|exempt
+// using the rp-vat-exempt-basket / rp-vat-zerorated-basket packs.
+func (ps *PackSet) BasketFor(category string) string {
+	cat := strings.ToLower(strings.TrimSpace(category))
+	if cat == "" {
+		return "standard_75"
+	}
+	if p := ps.Get("rp-vat-exempt-basket"); p != nil {
+		for _, r := range p.Rules {
+			if listMatch(r.Then["categories"], cat) {
+				return "exempt"
+			}
+		}
+	}
+	if p := ps.Get("rp-vat-zerorated-basket"); p != nil {
+		for _, r := range p.Rules {
+			if listMatch(r.Then["categories"], cat) {
+				return "zero_rated"
+			}
+		}
+	}
+	return "standard_75"
+}
+
+// StandardRateBPS returns the standard VAT rate in basis points (7.5% = 750)
+// from the rp-vat-rates pack (rule vat.rate.standard).
+func (ps *PackSet) StandardRateBPS() int64 {
+	if p := ps.Get("rp-vat-rates"); p != nil {
+		for _, r := range p.Rules {
+			if r.ID == "vat.rate.standard" {
+				if bps, ok := r.Then["rate_bps"].(int64); ok {
+					return bps
+				}
+			}
+		}
+	}
+	return 750
+}
+
+// AttributionConfig resolves the attribution mode + shares from
+// rp-vat-attribution-mode (defaults 1000/5500/3500 BPS).
+type AttributionConfig struct {
+	Mode            string `json:"mode"`
+	FederalShareBPS int64  `json:"federal_share_bps"`
+	StateShareBPS   int64  `json:"state_share_bps"`
+	LGAShareBPS     int64  `json:"lga_share_bps"`
+}
+
+func (ps *PackSet) AttributionConfig(fallback string) AttributionConfig {
+	cfg := AttributionConfig{Mode: fallback, FederalShareBPS: 1000, StateShareBPS: 5500, LGAShareBPS: 3500}
+	if p := ps.Get("rp-vat-attribution-mode"); p != nil {
+		for _, r := range p.Rules {
+			if r.ID == "vat.attribution.mode" {
+				if m := strOf(r.Then["mode"]); m != "" {
+					cfg.Mode = m
+				}
+			}
+			if r.ID == "vat.attribution.shares" {
+				if v, ok := r.Then["federal_share_bps"].(int64); ok {
+					cfg.FederalShareBPS = v
+				}
+				if v, ok := r.Then["state_share_bps"].(int64); ok {
+					cfg.StateShareBPS = v
+				}
+				if v, ok := r.Then["lga_share_bps"].(int64); ok {
+					cfg.LGAShareBPS = v
+				}
+			}
+		}
+	}
+	return cfg
 }

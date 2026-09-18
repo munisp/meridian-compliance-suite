@@ -6,7 +6,7 @@ import (
 )
 
 func TestYAMLParsePack(t *testing.T) {
-	p, err := packFromYAML("rp-vat-rates", embeddedPacks["rp-vat-rates"], "embedded")
+	p, err := packFromYAML("rp-vat-rates", []byte(embeddedPacks["rp-vat-rates"]))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestYAMLParsePack(t *testing.T) {
 }
 
 func TestYAMLExemptBasketList(t *testing.T) {
-	p, err := packFromYAML("rp-vat-exempt-basket", embeddedPacks["rp-vat-exempt-basket"], "embedded")
+	p, err := packFromYAML("rp-vat-exempt-basket", []byte(embeddedPacks["rp-vat-exempt-basket"]))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
