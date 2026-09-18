@@ -62,10 +62,11 @@ func TestMiddlewareSpanWithTenantHeader(t *testing.T) {
 	if tenant != "tenant-ng-01" {
 		t.Errorf("tenant.id = %q, want tenant-ng-01", tenant)
 	}
-	if route != "GET /v1/transfers/{id}" {
+	if route != "/v1/transfers/{id}" {
 		t.Errorf("http.route = %q, want templated route", route)
 	}
-	if s.Name != "GET GET /v1/transfers/{id}" && s.Name == "" {
+	// audit R4 #14: single-method span name ("GET GET /..." was the bug).
+	if s.Name != "GET /v1/transfers/{id}" {
 		t.Errorf("span name not templated: %q", s.Name)
 	}
 }
