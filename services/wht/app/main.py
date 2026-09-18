@@ -67,6 +67,8 @@ class EvaluateIn(BaseModel):
     payment_type: str = Field(..., description="canonical rp-wht-2024 vocabulary: dividend|interest|rent|royalty|supply_of_goods_materials|construction|consultancy|professional|technical|management|services|commission|directors_fees (legacy aliases goods/contract/service_fee/director_fee accepted)")
     beneficiary: str = Field("company", description="company|individual")
     amount_kobo: int = Field(..., gt=0)
+    includes_vat: bool = Field(False, description="the amount is VAT-inclusive; WHT base is net of VAT (pack rule wht.base.vat-exclusive)")
+    vat_kobo: int = Field(0, ge=0, description="VAT component of amount_kobo when includes_vat is true")
     supplier_monthly_turnover_kobo: Optional[int] = Field(
         None, description="LEGACY supplier-side fact (pre-audit pack); the carve-out now keys on the PAYER")
     supplier_size: str = Field("", description="LEGACY supplier-side fact (pre-audit pack)")
@@ -243,6 +245,8 @@ def get_credits(vendor_tin: str, principal=AuthDep):
 
 class ApplyCreditIn(BaseModel):
     amount_kobo: int = Field(..., gt=0)
+    includes_vat: bool = Field(False, description="the amount is VAT-inclusive; WHT base is net of VAT (pack rule wht.base.vat-exclusive)")
+    vat_kobo: int = Field(0, ge=0, description="VAT component of amount_kobo when includes_vat is true")
     note: str = ""
     idempotency_key: str = ""  # B3 #10: dedup retried applies
 

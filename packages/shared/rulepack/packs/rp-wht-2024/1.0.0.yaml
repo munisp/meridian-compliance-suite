@@ -278,6 +278,9 @@ rules:
     precedence: 10
     narrate: WHT 5% (non-resident) on supply or rendering of services OTHER THAN those specifically listed.
   citation: 'WHT Regs 2024, First Schedule row "services other than those specifically listed: 2%/5%" (KPMG)'
+- id: wht.base.vat-exclusive
+  when: { includes_vat: true }
+  then: { wht_base: net_of_vat, narrate: "VAT is a pass-through tax, not income: the WHT base is the net-of-VAT consideration (FIRS practice); engine deducts on amount_kobo minus vat_kobo" }
 - id: wht.no-tin.double-rate
   when:
     supplier_tin: null
@@ -431,4 +434,4 @@ rules:
 signed:
   algorithm: ed25519
   key_id: governance-board-2026
-  signature: cb41407484ddb424b66a258c8b29209e996a759b6af030f9a11f6c8a5169c0291c505cc43a0bfcfedcfe6644bea018bf29d4a1200ea19627eecb97895421980c
+  signature: PENDING-RESIGN  # INVALIDATED by wht.base.vat-exclusive addition; re-sign via rule-packs ceremony at merge
