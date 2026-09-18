@@ -102,8 +102,12 @@ func TestPropagationRoundTrip(t *testing.T) {
 	tracer := otel.Tracer("test")
 	ctx, clientSpan := tracer.Start(context.Background(), "outbound")
 	outReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://downstream/v1/x", nil)
+	// The instrumented transport clones the request before injecting, so the
+	// traceparent is observed at the fake downstream, not on outReq itself.
+	var injectedTP string
 	rt := Client(roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Header.Get("Traceparent") == "" {
+		injectedTP = r.Header.Get("Traceparent")
+		if injectedTP == "" {
 			t.Error("client transport did not inject traceparent")
 		}
 		return &http.Response{StatusCode: 200, Body: http.NoBody, Header: http.Header{}}, nil
@@ -115,7 +119,7 @@ func TestPropagationRoundTrip(t *testing.T) {
 
 	// Server side: middleware must join the same trace as remote parent.
 	inReq := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
-	inReq.Header.Set("Traceparent", outReq.Header.Get("Traceparent"))
+	inReq.Header.Set("Traceparent", injectedTP)
 	Middleware(http.HandlerFunc(okHandler)).ServeHTTP(httptest.NewRecorder(), inReq)
 
 	var serverSpan *tracetest.SpanStub

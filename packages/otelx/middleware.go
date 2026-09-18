@@ -1,5 +1,3 @@
-package otelx
-
 // Middleware: OTel HTTP middleware for Go services (e.g. einvoicing).
 // One SERVER span per request carrying:
 //   - http.route = the TEMPLATED route (e.g. /v1/invoices/{id}), never the
@@ -25,7 +23,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -118,7 +115,7 @@ func (rt roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx, span := tracer.Start(req.Context(), req.Method+" "+req.URL.Host+redactPath(req.URL.Path),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			semconv.HTTPRequestMethodKey.String(req.Method),
+			semconv.HTTPRequestMethodKey.String(r.Method),
 			semconv.URLFull(safeURL.String()),
 			attribute.String("server.address", req.URL.Host),
 		))
