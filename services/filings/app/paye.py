@@ -4,10 +4,12 @@ Monthly PAYE return: employee-level rows (TIN, name, gross, pension/reliefs,
 tax), due the 10th of the following month (PITA s.81; rp-fmt-federal
 fmt.federal.paye). Annual Form H1 reconciliation due 31 January.
 
-Tax computation mirrors rp-paye-pitra-legacy: exempt deductions (pension,
-NHF, NHIS, life assurance, gratuity), CRA = higher of fixed/1% gross plus
-20% of gross, annual bands 7-24%, 1% minimum tax. Monthly tax = annual/12
-rounded half-up. Integer kobo throughout.
+Tax computation is effective-dated: periods before 2026 mirror
+rp-paye-pitra-legacy (exempt deductions, CRA, bands 7-24%, 1% minimum tax);
+periods from 2026-01-01 mirror the canonical pack rp-paye-nta@1.0.0 (NTA
+2025: no CRA, <= N800k exempt, bands 0/15/18/21/23/25, rent relief 20%
+capped N500k, no minimum tax). Monthly tax = annual/12 rounded half-up.
+Integer kobo throughout.
 
 REAL: schedule/return generation, employer aggregation, H1.
 """
@@ -19,7 +21,10 @@ from decimal import Decimal
 
 from . import store
 from .rules_data import (PAYE_BANDS, PAYE_CRA, PAYE_EXEMPT_DEDUCTION_KEYS,
-                         PAYE_MINIMUM_TAX_BPS, resolve)
+                         PAYE_MINIMUM_TAX_BPS, PAYE_NTA_BANDS,
+                         PAYE_NTA_DEDUCTION_KEYS, PAYE_NTA_EFFECTIVE,
+                         PAYE_NTA_EXEMPTION_KOBO, PAYE_NTA_RENT_RELIEF_BPS,
+                         PAYE_NTA_RENT_RELIEF_CAP_KOBO, resolve)
 from .util import deadline_nth_of_following_month, round_half_up
 
 PAYE_FILING_DAY = 10
@@ -32,20 +37,51 @@ class PayeError(ValueError):
     pass
 
 
-def employee_annual_tax(gross_kobo: int, deductions: dict, when: date) -> dict:
-    gross = int(gross_kobo)
-    exempt = sum(int(deductions.get(k, 0)) for k in PAYE_EXEMPT_DEDUCTION_KEYS)
-    fixed, cra_bps = resolve(PAYE_CRA, when)
-    cra = max(fixed, gross // 100) + gross * cra_bps // 10_000
-    taxable = max(gross - exempt - cra, 0)
+def _band_tax(taxable: int, bands) -> int:
     tax = 0
     remaining = taxable
-    for width, bps in resolve(PAYE_BANDS, when):
+    for width, bps in bands:
         slice_kobo = remaining if width is None else min(remaining, width)
         tax += slice_kobo * bps // 10_000
         remaining -= slice_kobo
         if remaining <= 0:
             break
+    return tax
+
+
+def employee_annual_tax(gross_kobo: int, deductions: dict, when: date) -> dict:
+    gross = int(gross_kobo)
+    if when >= PAYE_NTA_EFFECTIVE:
+        # NTA 2025 regime (canonical pack rp-paye-nta@1.0.0, mirrored in
+        # rules_data): no CRA, rent relief (20% capped N500k) + statutory
+        # deductions before banding, <= N800k gross exempt, bands
+        # 0/15/18/21/23/25, no 1% minimum tax. Pre-2026 years stay on the
+        # PITA legacy path below (effective-dated).
+        exempt = sum(int(deductions.get(k, 0)) for k in PAYE_NTA_DEDUCTION_KEYS)
+        rent_relief = min(
+            int(deductions.get("annual_rent_paid_kobo", 0))
+            * PAYE_NTA_RENT_RELIEF_BPS // 10_000,
+            PAYE_NTA_RENT_RELIEF_CAP_KOBO)
+        if gross <= PAYE_NTA_EXEMPTION_KOBO:
+            taxable, tax = 0, 0  # paye.nta.exemption.threshold
+        else:
+            taxable = max(gross - exempt - rent_relief, 0)
+            tax = _band_tax(taxable, PAYE_NTA_BANDS)
+        return {
+            "gross_annual_kobo": gross,
+            "exempt_deductions_kobo": exempt,
+            "cra_kobo": 0,  # CRA abolished under the NTA (paye.nta.no-cra)
+            "rent_relief_kobo": rent_relief,
+            "taxable_income_kobo": taxable,
+            "annual_tax_kobo": tax,
+            "monthly_tax_kobo": round_half_up(Decimal(tax) / Decimal(12)),
+            "regime": "nta-2025",
+        }
+    exempt = sum(int(deductions.get(k, 0)) for k in PAYE_EXEMPT_DEDUCTION_KEYS)
+    fixed, cra_bps = resolve(PAYE_CRA, when)
+    cra = max(fixed, gross // 100) + gross * cra_bps // 10_000
+    taxable = max(gross - exempt - cra, 0)
+    tax = _band_tax(taxable, resolve(PAYE_BANDS, when))
     min_tax = gross * resolve(PAYE_MINIMUM_TAX_BPS, when) // 10_000
     if taxable == 0:
         tax = min_tax
@@ -56,6 +92,7 @@ def employee_annual_tax(gross_kobo: int, deductions: dict, when: date) -> dict:
         "taxable_income_kobo": taxable,
         "annual_tax_kobo": tax,
         "monthly_tax_kobo": round_half_up(Decimal(tax) / Decimal(12)),
+        "regime": "pitra-legacy",
     }
 
 
@@ -70,7 +107,12 @@ def build_monthly_schedule(tin_employer: str, period: str,
     rows = []
     for e in employees:
         monthly_gross = int(e["gross_kobo"])
-        deductions = {k: int(e.get(k, 0)) * 12 for k in PAYE_EXEMPT_DEDUCTION_KEYS}
+        ded_keys = (PAYE_NTA_DEDUCTION_KEYS if when >= PAYE_NTA_EFFECTIVE
+                    else PAYE_EXEMPT_DEDUCTION_KEYS)
+        deductions = {k: int(e.get(k, 0)) * 12 for k in ded_keys}
+        # NTA rent relief is annual; carried through when provided monthly.
+        if when >= PAYE_NTA_EFFECTIVE and e.get("annual_rent_paid_kobo"):
+            deductions["annual_rent_paid_kobo"] = int(e["annual_rent_paid_kobo"])
         r = employee_annual_tax(monthly_gross * 12, deductions, when)
         rows.append({
             "tin": e["tin"],

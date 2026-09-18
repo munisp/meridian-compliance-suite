@@ -96,6 +96,31 @@ PAYE_MINIMUM_TAX_BPS = [
 PAYE_EXEMPT_DEDUCTION_KEYS = ("pension_kobo", "nhf_kobo", "nhis_kobo",
                               "life_assurance_kobo", "gratuity_kobo")
 
+# --- PAYE under the Nigeria Tax Act 2025 (effective 2026-01-01), mirrored
+# 1:1 from the canonical pack rp-paye-nta@1.0.0 (meridian-rule-packs,
+# branch fix/r4-paye-nta-2026 / PR #10; Fourth Schedule + s.30):
+#   * <= N800,000 annual gross fully exempt (expanded 0% band)
+#   * rent relief 20% of annual rent, capped N500,000, before banding
+#   * statutory deductions (pension/NHF/NHIS/life assurance/owner-occupied
+#     house loan interest) before banding; NO CRA (abolished); NO 1%
+#     minimum tax (replaced by the expanded 0% band)
+#   * bands 0/15/18/21/23/25 (boundary min-inclusive/max-exclusive)
+PAYE_NTA_EFFECTIVE = date(2026, 1, 1)
+PAYE_NTA_EXEMPTION_KOBO = 800_000_00
+PAYE_NTA_RENT_RELIEF_BPS = 2000
+PAYE_NTA_RENT_RELIEF_CAP_KOBO = 500_000_00
+PAYE_NTA_BANDS = [
+    (800_000_00, 0),        # first N800,000 at 0%
+    (2_200_000_00, 1500),   # next N2.2m at 15%
+    (9_000_000_00, 1800),   # next N9m at 18%
+    (13_000_000_00, 2100),  # next N13m at 21%
+    (25_000_000_00, 2300),  # next N25m at 23%
+    (None, 2500),           # above N50m at 25%
+]
+PAYE_NTA_DEDUCTION_KEYS = ("pension_kobo", "nhf_kobo", "nhis_kobo",
+                           "life_assurance_kobo",
+                           "owner_occupied_loan_interest_kobo")
+
 
 def resolve(table, when: date):
     """Latest row with effective_from <= when; fail-closed if none."""
