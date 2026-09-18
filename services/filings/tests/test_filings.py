@@ -120,7 +120,9 @@ EMPLOYEES = [
 
 
 def test_paye_employee_tax_bands_and_cra():
-    r = paye.employee_annual_tax(3_600_000_00, {}, date(2026, 1, 1))
+    # Legacy PITA regime (pre-2026): 2026+ periods are governed by the NTA
+    # (rp-paye-nta) — see test_paye_nta.py.
+    r = paye.employee_annual_tax(3_600_000_00, {}, date(2025, 1, 1))
     # CRA = max(200k, 36k) + 720k = 920k; taxable = 2.68m
     assert r["cra_kobo"] == 920_000_00
     assert r["taxable_income_kobo"] == 2_680_000_00
@@ -131,7 +133,9 @@ def test_paye_employee_tax_bands_and_cra():
 
 
 def test_paye_minimum_tax_when_no_taxable():
-    r = paye.employee_annual_tax(150_000_00, {}, date(2026, 1, 1))
+    # Legacy PITA regime (pre-2026): the 1% minimum tax is abolished under
+    # the NTA from 2026 (expanded 0% band) — see test_paye_nta.py.
+    r = paye.employee_annual_tax(150_000_00, {}, date(2025, 1, 1))
     # CRA alone (max(200k,1.5k)+30k=230k) > gross -> taxable 0 -> 1% min tax
     assert r["taxable_income_kobo"] == 0
     assert r["annual_tax_kobo"] == 1_500_00
