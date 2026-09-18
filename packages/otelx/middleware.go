@@ -115,7 +115,7 @@ func (rt roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx, span := tracer.Start(req.Context(), req.Method+" "+req.URL.Host+redactPath(req.URL.Path),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			semconv.HTTPRequestMethodKey.String(r.Method),
+			semconv.HTTPRequestMethodKey.String(req.Method),
 			semconv.URLFull(safeURL.String()),
 			attribute.String("server.address", req.URL.Host),
 		))
