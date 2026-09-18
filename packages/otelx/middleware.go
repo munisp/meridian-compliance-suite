@@ -1,134 +1,133 @@
 package otelx
 
-// middleware.go — server + client HTTP instrumentation wrapping the existing
-// httpx servers. One span per request named "<METHOD> <route-template>" using
-// the Go 1.22 ServeMux pattern (r.Pattern, low cardinality), with tenant.id
-// set from TenantFromRequest. The client wrapper injects W3C tracecontext +
-// baggage into outbound requests.
+// Middleware: OTel HTTP middleware for Go services (e.g. einvoicing).
+// One SERVER span per request carrying:
+//   - http.route = the TEMPLATED route (e.g. /v1/invoices/{id}), never the
+//     raw path (low cardinality);
+//   - tenant.id  = resolved tenant (header or JWT claim), propagated as
+//     baggage for downstream calls;
+//   - a W3C traceparent extracted from inbound headers (B3 propagation).
+//
+// Client: outbound RoundTripper that starts a CLIENT span per call and
+// injects traceparent + baggage (tenant) into the outbound request.
+//
+// Design: no hard dependency on a collector — spans are no-ops when the
+// global TracerProvider is unset (InitProviders installs a real one).
+package otelx
 
 import (
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
 const tracerName = "github.com/munisp/meridian-compliance-suite/packages/otelx"
 
-// spanStatusRecorder mirrors httpx's recorder: default 200, capture explicit
-// WriteHeader, and satisfy http.Flusher for streaming handlers.
-type spanStatusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (sr *spanStatusRecorder) WriteHeader(code int) {
-	sr.status = code
-	sr.ResponseWriter.WriteHeader(code)
-}
-
-func (sr *spanStatusRecorder) Flush() {
-	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-// Middleware wraps an httpx handler: extracts inbound trace context, starts a
-// server span, labels it with tenant.id, and stamps the route template after
-// the handler runs (r.Pattern is only populated post-routing).
+// Middleware returns an http.Handler that wraps next with a SERVER span.
+// When next is a *http.ServeMux, the span is renamed to the matched route
+// template (Go 1.22 mux gives the registered pattern via Pattern).
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := otel.GetTextMapPropagator().Extract(r.Context(),
-			propagationHeaderCarrier(r.Header))
-		tracer := otel.Tracer(tracerName)
-		ctx, span := tracer.Start(ctx, r.Method+" "+r.URL.Path,
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(
-				semconv.HTTPRequestMethodKey.String(r.Method),
-				semconv.URLPath(r.URL.Path),
-			))
-		defer span.End()
+			propagationHeaderCarrier{h: r.Header})
 
-		tenant := TenantFromRequest(r.WithContext(ctx))
+		tenant := TenantFromRequest(r)
 		if tenant != "" {
-			span.SetAttributes(TenantAttr(tenant))
-			// Reflect tenant into baggage so downstream hops inherit it.
-			if m, err := baggage.NewMember(TenantKey, tenant); err == nil {
-				if bg, err := baggage.New(m); err == nil {
-					ctx = baggage.ContextWithBaggage(ctx, bg)
+			if member, err := baggage.NewMember("tenant.id", tenant); err == nil {
+				if bag, err := baggage.New(member); err == nil {
+					ctx = baggage.ContextWithBaggage(ctx, bag)
 				}
 			}
 		}
 
-		sr := &spanStatusRecorder{ResponseWriter: w, status: http.StatusOK}
-		r2 := r.WithContext(ctx)
-		next.ServeHTTP(sr, r2)
+		tracer := otel.Tracer(tracerName)
+		// The provisional span name/attributes use the REDACTED path only
+		// (audit R4 #14): raw paths can embed PII (TINs in /v1/wht/credits/
+		// <tin>, IRNs in /v1/invoices/<irn>) and must never reach a span.
+		ctx, span := tracer.Start(ctx, r.Method+" "+redactPath(r.URL.Path),
+			trace.WithSpanKind(trace.SpanKindServer),
+			trace.WithAttributes(
+				semconv.HTTPRequestMethodKey.String(r.Method),
+				semconv.URLPath(redactPath(r.URL.Path)),
+			))
+		defer span.End()
 
-		// NOTE (mirror delta): http.Request.Pattern exists only in Go 1.23+;
-		// this module targets Go 1.22, so the route template is recovered
-		// from the wrapped ServeMux instead (same low-cardinality value).
+		if tenant != "" {
+			span.SetAttributes(attribute.String("tenant.id", tenant))
+		}
+
+		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		r2 := r.WithContext(ctx)
+		next.ServeHTTP(rw, r2)
+
+		// Low-cardinality route template (Go 1.22 mux knows the pattern).
+		// Falls back to "unmatched" for 404s outside any registered route.
 		route := ""
 		if mux, ok := next.(*http.ServeMux); ok {
 			_, route = mux.Handler(r2)
 		}
 		if route == "" {
 			route = "unmatched"
+		} else {
+			// Go 1.22 ServeMux method patterns already carry the verb
+			// ("GET /v1/..."): prefixing r.Method produced the
+			// double-method span name "GET GET /v1/..." (audit R4 #14).
+			route = stripMethodPrefix(route)
 		}
 		span.SetName(r.Method + " " + route)
 		span.SetAttributes(
 			semconv.HTTPRoute(route),
-			semconv.HTTPResponseStatusCode(sr.status),
+			semconv.HTTPResponseStatusCode(rw.status),
 		)
-		if sr.status >= 500 {
-			span.SetStatus(codes.Error, fmt.Sprintf("status %d", sr.status))
+		if rw.status >= 500 {
+			span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", rw.status))
 		} else {
 			span.SetStatus(codes.Ok, "")
 		}
 	})
 }
 
-// propagationHeaderCarrier adapts http.Header to propagation.TextMapCarrier.
-type propagationHeaderCarrier http.Header
-
-func (c propagationHeaderCarrier) Get(key string) string { return http.Header(c).Get(key) }
-func (c propagationHeaderCarrier) Set(key, value string) { http.Header(c).Set(key, value) }
-func (c propagationHeaderCarrier) Keys() []string {
-	keys := make([]string, 0, len(c))
-	for k := range c {
-		keys = append(keys, k)
+// Client wraps an http.RoundTripper with a CLIENT span and injects the
+// W3C traceparent + tenant baggage into the outbound request headers.
+func Client(base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
 	}
-	return keys
+	return roundTripper{base: base}
 }
 
-// Client instruments an outbound HTTP client: traceparent/tracestate/baggage
-// are injected from the request context and a client span is created per call.
-// Pass nil to wrap http.DefaultTransport.
-func Client(rt http.RoundTripper) http.RoundTripper {
-	if rt == nil {
-		rt = http.DefaultTransport
-	}
-	return &clientTransport{base: rt}
-}
+type roundTripper struct{ base http.RoundTripper }
 
-type clientTransport struct{ base http.RoundTripper }
-
-func (t *clientTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (rt roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	tracer := otel.Tracer(tracerName)
-	ctx, span := tracer.Start(req.Context(), req.Method+" "+req.URL.Host+req.URL.Path,
+	// PII (audit R4 #14): the full URL carries the query string (tin=, irn=)
+	// and paths can embed TINs/IRNs — record the redacted, query-free URL.
+	safeURL := *req.URL
+	safeURL.RawQuery, safeURL.Fragment = "", ""
+	safeURL.Path = redactPath(safeURL.Path)
+	safeURL.RawPath = ""
+	ctx, span := tracer.Start(req.Context(), req.Method+" "+req.URL.Host+redactPath(req.URL.Path),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
 			semconv.HTTPRequestMethodKey.String(req.Method),
-			semconv.URLFull(req.URL.String()),
+			semconv.URLFull(safeURL.String()),
 			attribute.String("server.address", req.URL.Host),
 		))
 	defer span.End()
-	otel.GetTextMapPropagator().Inject(ctx, propagationHeaderCarrier(req.Header))
-	resp, err := t.base.RoundTrip(req.WithContext(ctx))
+
+	r2 := req.Clone(ctx)
+	otel.GetTextMapPropagator().Inject(ctx, propagationHeaderCarrier{h: r2.Header})
+
+	resp, err := rt.base.RoundTrip(r2)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -136,7 +135,76 @@ func (t *clientTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	span.SetAttributes(semconv.HTTPResponseStatusCode(resp.StatusCode))
 	if resp.StatusCode >= 500 {
-		span.SetStatus(codes.Error, fmt.Sprintf("status %d", resp.StatusCode))
+		span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
 	return resp, nil
+}
+
+// statusWriter captures the response status code.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher so streaming handlers (SSE) keep working.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// stripMethodPrefix removes the leading HTTP verb from a Go 1.22 ServeMux
+// pattern ("GET /v1/x" -> "/v1/x"); host patterns are preserved.
+func stripMethodPrefix(pattern string) string {
+	if i := strings.IndexByte(pattern, ' '); i > 0 {
+		switch pattern[:i] {
+		case http.MethodGet, http.MethodHead, http.MethodPost,
+			http.MethodPut, http.MethodPatch, http.MethodDelete,
+			http.MethodConnect, http.MethodOptions, http.MethodTrace:
+			return pattern[i+1:]
+		}
+	}
+	return pattern
+}
+
+// redactPath replaces path segments that can carry taxpayer PII — TINs
+// (digit-heavy, e.g. 1234567890123) and e-invoice IRNs
+// (<number>-<serviceId8>-<yyyymmdd>) — with a placeholder, so TINs/IRNs
+// never appear in span names or attributes (audit R4 #14).
+var (
+	tinSegment = regexp.MustCompile(`^[0-9][0-9-]{7,}$`)
+	irnSegment = regexp.MustCompile(`^[^/]+-[^/-]{8}-[0-9]{8}$`)
+)
+
+func redactPath(p string) string {
+	segs := strings.Split(p, "/")
+	redacted := false
+	for i, seg := range segs {
+		if tinSegment.MatchString(seg) || irnSegment.MatchString(seg) {
+			segs[i] = "{redacted}"
+			redacted = true
+		}
+	}
+	if !redacted {
+		return p
+	}
+	return strings.Join(segs, "/")
+}
+
+// propagationHeaderCarrier adapts http.Header to propagation.TextMapCarrier.
+type propagationHeaderCarrier struct{ h http.Header }
+
+func (c propagationHeaderCarrier) Get(key string) string { return c.h.Get(key) }
+func (c propagationHeaderCarrier) Set(key, value string) { c.h.Set(key, value) }
+func (c propagationHeaderCarrier) Keys() []string {
+	out := make([]string, 0, len(c.h))
+	for k := range c.h {
+		out = append(out, k)
+	}
+	return out
 }

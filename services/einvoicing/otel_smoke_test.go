@@ -50,7 +50,9 @@ func TestOTelMiddlewareSpanSmoke(t *testing.T) {
 	if tenant != "tenant-smoke-01" {
 		t.Errorf("tenant.id = %q, want tenant-smoke-01", tenant)
 	}
-	if route != "GET /v1/ping/{id}" {
+	// http.route is the path template (audit R4 #14: the Go 1.22 method
+	// pattern's verb prefix is stripped — "GET GET /..." was the bug).
+	if route != "/v1/ping/{id}" {
 		t.Errorf("http.route = %q, want templated route", route)
 	}
 }
