@@ -134,6 +134,7 @@ func ULID() string {
 			}
 		out[i] = crockford[v]
 	}
+	}
 	return string(out[:])
 }
 
