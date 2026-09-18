@@ -133,6 +133,14 @@ func (s *Service) processReceipt(rc *Receipt, idem string) (*Receipt, error) {
 	}
 	rc.TotalKobo = total
 	rc.VATKobo = vat
+	// Designated platform-collectors regime (rp-platform-collectors, audit R4
+	// S1a#8): IsPlatformCollector was dead code and the regime never ran —
+	// wire it in so sales through a designated platform are collected and
+	// remitted by the platform (collector of record = the platform TIN).
+	if s.packs.IsPlatformCollector(rc.MerchantTIN) {
+		rc.PlatformCollected = true
+		rc.CollectorTIN = rc.MerchantTIN
+	}
 	// LCE SPEC §5: annotate the response with statute citations for the
 	// computed VAT (lookup over the basket decisions above; no logic change).
 	rc.Citations = s.receiptCitations(basketCats)
@@ -247,6 +255,8 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 	// Receipts ingested after their period settled are picked up here as a
 	// supplemental carry-over settlement — never silently dropped.
 	var vat, federal, state, lga int64
+	var platformVAT int64
+	var platformCount int
 	var count int
 	var unsettledIDs []string
 	var totalCount int
@@ -265,6 +275,12 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 				lgaKobo = rc.VATKobo - rc.Attribution.FederalKobo - rc.Attribution.StateKobo
 			}
 			lga += lgaKobo
+			if rc.PlatformCollected {
+				// Marketplace VAT collected & remitted by the platform
+				// (rp-platform-collectors) — tracked as its own settlement leg.
+				platformVAT += rc.VATKobo
+				platformCount++
+			}
 			count++
 			unsettledIDs = append(unsettledIDs, rc.ID)
 		}
@@ -298,7 +314,8 @@ func (s *Service) handleSettlementRecon(w http.ResponseWriter, r *http.Request) 
 	reconID := DeterministicTransferID(fmt.Sprintf("posv-recon:%s:%s:%d", req.TenantID, req.Period, supp))[:16]
 	rec := &ReconRecord{ID: reconID, Period: req.Period, TenantID: req.TenantID, Receipts: count,
 		VATKobo: vat, FederalKobo: federal, StateKobo: state, LGAKobo: lga, Supplement: supp,
-		LedgerMode: s.ledger.Mode(), PostedAt: nowRFC3339()}
+		PlatformCollectedKobo: platformVAT, PlatformReceipts: platformCount,
+		LedgerMode:             s.ledger.Mode(), PostedAt: nowRFC3339()}
 	merchant := accountID(LedgerVATRemittance, NSVATMerchant)
 	s.ledger.CreateAccounts([]LedgerAccount{{ID: merchant, Ledger: LedgerVATRemittance, Code: 4}})
 	if err := s.settlePeriod(req.TenantID, req.Period, merchant, federal, state, lga, reconID, supp); err != nil {
