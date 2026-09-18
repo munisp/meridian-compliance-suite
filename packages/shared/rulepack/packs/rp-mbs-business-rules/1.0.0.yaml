@@ -41,3 +41,13 @@ rules:
   - id: mbs.large.invoice.flag
     when: { payable_amount_kobo__gte: 10000000000 }
     then: { large_invoice_review: true, narrate: ">= N100m flagged for enhanced review" }
+  # Enforcement-parameter rules: these carry no `violation` attr because the
+  # rules-engine cannot evaluate wall-clock or registry lookups. The
+  # einvoicing validator enforces them pack-data-driven (see validate.go) —
+  # the pack values below govern, code only executes them.
+  - id: mbs.date.window
+    when: { supplier_tin_len__gte: 1 }
+    then: { check_backdate_window: enforce, max_backdate_days: 7, narrate: "issue_date must not be backdated more than max_backdate_days before submission" }
+  - id: mbs.tin.live
+    when: { supplier_tin_len__gte: 1 }
+    then: { check_tin_liveness: enforce, narrate: "supplier TIN must be live in the registry (active); deregistered/suspended/unknown TINs are rejected" }

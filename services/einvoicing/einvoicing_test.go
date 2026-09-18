@@ -5,18 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sampleInvoice() *CanonicalInvoice {
 	inv := &CanonicalInvoice{
 		InvoiceNumber: "INV-2026-0001",
 		InvoiceType:   "B2B",
-		IssueDate:     "2026-01-15",
+		IssueDate:     time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02"),
 		Supplier:      Party{TIN: "1234567890123", Name: "Acme Supplies Ltd", State: "Lagos"},
 		Customer:      Party{TIN: "9876543210987", Name: "Buyer Co"},
 		Lines: []InvoiceLine{
@@ -105,8 +107,9 @@ func TestMBSSandboxPreclear(t *testing.T) {
 		t.Fatalf("bad result %+v", res)
 	}
 	// canonical NRS format: <invNum>-<svcID8>-<YYYYMMDD> (nrs_irn.go)
-	if res.IRN != "INV-2026-0001-MBSSIM01-20260115" {
-		t.Fatalf("irn=%s", res.IRN)
+	wantIRN := "INV-2026-0001-MBSSIM01-" + strings.ReplaceAll(inv.IssueDate, "-", "")
+	if res.IRN != wantIRN {
+		t.Fatalf("irn=%s want %s", res.IRN, wantIRN)
 	}
 	if _, _, _, err := ParseIRN(res.IRN); err != nil {
 		t.Fatalf("sandbox IRN must parse: %v", err)
@@ -296,17 +299,17 @@ func TestMultiAPPRouter(t *testing.T) {
 // Einvoicing.tsx) through RESTAdapter.Parse + Normalise + Validator. Guards the
 // audit finding where supplier_tin/buyer_tin/qty were silently dropped.
 func TestPortalPayloadContract(t *testing.T) {
-	portalPayload := `{
+	portalPayload := fmt.Sprintf(`{
 	  "invoice_number": "WEB-1785000000000",
 	  "invoice_type": "B2B",
-	  "issue_date": "2026-07-31",
+	  "issue_date": "%s",
 	  "currency": "NGN",
 	  "supplier": {"tin": "12345678-0001", "name": "Supplier 12345678-0001", "country": "NG"},
 	  "customer": {"tin": "87654321-0001", "name": "Buyer 87654321-0001", "country": "NG"},
 	  "lines": [{"id": "1", "description": "Consulting services",
 	    "quantity_milli": 1000, "unit_price_kobo": 10000000,
 	    "vat_category": "S", "vat_rate_bps": 750}]
-	}`
+	}`, time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02"))
 	invs, err := RESTAdapter{}.Parse([]byte(portalPayload))
 	if err != nil {
 		t.Fatalf("portal payload must parse: %v", err)
