@@ -185,7 +185,7 @@ class AssessmentStore:
             raise AssessmentError("decision out of time; objection is deemed upheld")
         if outcome not in ("upheld", "partially_upheld", "rejected"):
             raise AssessmentError(f"unknown outcome {outcome!r}")
-        a = self._docs.get("objections", objection_id) and self._docs.get("assessments", obj["assessment_id"])
+        a = self._docs.get("assessments", obj["assessment_id"])
         if outcome == "partially_upheld":
             if revised_amount_kobo is None or not (0 <= int(revised_amount_kobo) < a["amount_kobo"]):
                 raise AssessmentError("partially_upheld requires a lower revised amount")
