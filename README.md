@@ -15,14 +15,20 @@ compliance-suite/
 │   │                    #   rulepack loader/evaluator + embedded rp-* packs (§1.4)
 │   └── py/meridian_py/  # Python package with the same helpers (pip install -e)
 ├── services/
-│   ├── einvoicing/      # Go — T1/T2
+│   ├── einvoicing/      # Go — T1/T2 (e-invoicing, NRS rail, VAT summary, API keys)
 │   ├── rev360/          # Python FastAPI — T3
-│   ├── wht/             # Python FastAPI — T7
+│   ├── wht/             # Python FastAPI — T7 (WHT 2024 engine, credits, certificates)
 │   ├── tp-cbcr/         # Python FastAPI — T8
+│   ├── filings/         # Python FastAPI — F1-F4 periodic filings (VAT-002,
+│   │                    #   PAYE schedules + H1, CIT, assessment/objection lifecycle)
+│   ├── str-filing/      # Python FastAPI — STR/CTR AML filing pipeline (NFIU)
+│   ├── insights/        # Python FastAPI — I8-I12/I14 compliance intelligence
+│   │                    #   (circularity, benchmarks, explanations, FX)
 │   ├── pos-vat, etr, vasp-carf, case-mgmt/   # (Agent B scope — see part B)
 │   └── ...
 ├── portals/             # (Agent B scope)
-└── docker-compose.yml   # optional dev stack
+└── docker-compose.yml   # optional dev stack (einvoicing, rev360, wht,
+                         #   tp-cbcr, str-filing — see "Docker compose" below)
 ```
 
 ## Conventions (SPEC §1)
@@ -63,6 +69,21 @@ REST surface (SPEC §3):
 `POST /v1/b2c/report`, `GET /v1/replay`, plus
 `POST /v1/replay/{seq}`, `GET /v1/workflows`, `GET /v1/apps`,
 `GET /v1/csid/public-key`.
+
+**Also mounted (R4: previously undocumented)**:
+`POST /v1/invoices/nrs` (NRS rail submission; replay/resume is tenant-guarded —
+cross-tenant IRN or idempotency-key replay returns 404),
+`PATCH /v1/invoices/{irn}`, `GET /v1/invoices/{id}/qr`,
+`GET /v1/vat/summary` (per-tenant VAT summary),
+`POST /v1/webhooks`,
+`/v1/apikeys` lifecycle (`POST /v1/apikeys`, `POST /v1/apikeys/{id}/rotate`,
+`POST /v1/apikeys/{id}/revoke` — JWT auth only; **X-Api-Key is hard-denied on
+/v1/apikeys***). Machine auth: `X-Api-Key` (`mrk_…`, hashed at rest) is scoped
+to `/v1/invoices*`, `/v1/b2c/*`, `/v1/vat/*` — all other paths require a Bearer
+JWT. The NRS rail client is fail-closed: only explicit `cleared`/`accepted`
+rail statuses map through (empty/unknown 2xx ⇒ error + retry), 401 triggers a
+single-flighted re-login + one retry, and the live profile requires
+`MBS_LIVE_BASE_URL` (https) + `MBS_LIVE_*` credentials (no sandbox fallback).
 
 ```bash
 export PATH=$HOME/sdk/go/bin:$PATH
@@ -141,7 +162,28 @@ pip install -r services/rev360/requirements.txt -r services/wht/requirements.txt
             -r services/tp-cbcr/requirements.txt
 (cd services/rev360 && pytest) && (cd services/wht && pytest) && \
   (cd services/tp-cbcr && pytest)
+
+# filings / str-filing / insights (zero-deps dev mode, SQLite/in-mem stores)
+(cd services/filings && pytest) && (cd services/str-filing && pytest) && \
+  (cd services/insights && pytest)
 ```
+
+Run filings or insights standalone (dev profile, no external deps):
+
+```bash
+(cd services/filings  && uvicorn app.main:app --port 8160)   # F1-F4 filings API
+(cd services/insights && uvicorn app.main:app --port 8170)   # I8-I12 insights API
+```
+
+## Docker compose (optional dev stack)
+
+`docker-compose.yml` brings up einvoicing, rev360, wht, tp-cbcr and
+str-filing with their dev data volumes. **services/filings and
+services/insights are intentionally not in the compose stack**: both are
+self-contained FastAPI apps with embedded dev stores — run them standalone
+as shown above (or `uvicorn app.main:app` from each directory); add compose
+entries alongside the other `python:3.12-slim` services if you want them in
+the stack.
 
 ## Honesty tags (what is simulated)
 
