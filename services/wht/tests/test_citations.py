@@ -31,7 +31,8 @@ def test_directors_fees_15pct_cites_first_schedule():
     assert cit["statute_sections"] == [
         "wht-regs-2024:first-schedule.directors-fees"]
     assert cit["citation_kind"] == "secondary"  # until CTC verification
-    assert cit["pack_id"] == "rp-wht-2024" and cit["pack_version"] == "1.0.0"
+    # served pack is now 1.1.0 (canonical VAT-exclusive-base pack)
+    assert cit["pack_id"] == "rp-wht-2024" and cit["pack_version"] == "1.1.0"
     # every computed amount maps back to the rules that priced it
     assert "wht.rate.directors-fees.individual" in \
         body["amount_citations"]["wht_kobo"]
