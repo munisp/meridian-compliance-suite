@@ -6,12 +6,14 @@ C8 (manual requeue) and C10 (STR-specific audit trail). Modelled on the
 proven Odoo nrs.submission_log retry/requeue pattern.
 
 Intake: REST POST /v1/str and Kafka topic ``nrs.aml.str.created`` (PEP/EDD
-and sanctions-hit risk events from kyc-engine). Queue: durable Postgres
-table str_filings. Submission: NFIU HTTP adapter (REAL, prod default) with
-a SIM adapter behind the same interface for dev/test (tagged SIM, refused
-in prod profile). Retries: exponential backoff, dead-letter after
-max_attempts, RBAC-gated manual requeue (Permify checkRel pattern from
-case-mgmt). Audit: WORM-style record per state transition via the platform
+and sanctions-hit risk events from kyc-engine), plus ``nrs.aml.ctr.v1``
+currency-transaction events routed to the statutory CTR aggregation
+pipeline (audit R4 S1b#2). Queue: durable Postgres table str_filings.
+Submission: NFIU HTTP adapter (REAL, prod default) with a SIM adapter
+behind the same interface for dev/test (tagged SIM, refused in prod
+profile). Retries: exponential backoff, dead-letter after max_attempts,
+RBAC-gated manual requeue (Permify checkRel pattern from case-mgmt).
+Audit: WORM-style record per state transition via the platform
 audit-evidence API (local hash-chained fallback in dev).
 """
 from __future__ import annotations
@@ -28,7 +30,7 @@ from pydantic import BaseModel, Field
 from prometheus_client import generate_latest
 from sqlalchemy.exc import IntegrityError
 
-from . import authz, bus, db
+from . import authz, bus, ctr, db
 from .audit import audit_from_env
 from .nfiu import SimNFIUClient, adapter_from_env
 from .worker import FilingWorker, Metrics, start_background
@@ -47,7 +49,7 @@ async def lifespan(app_):
     worker.refresh_dlq_depth()
     if os.environ.get("STR_WORKER_ENABLED", "true").lower() == "true":
         start_background(worker)
-    bus.start_consumer(intake_event, _stop)
+    bus.start_consumer(dispatch_event, _stop)
     yield
     _stop.set()
 
@@ -114,6 +116,14 @@ class STRIn(BaseModel):
 
 def _canonical_payload(payload: dict) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def dispatch_event(event: dict, *, actor: str, topic: str = bus.TOPIC) -> tuple[dict, bool]:
+    """Bus entrypoint: route consumed aml events (audit R4 S1b#2 — the CTR
+    topic was emitted by the ledger but never consumed)."""
+    if topic == "nrs.aml.ctr.v1":
+        return ctr.intake_ctr(event, actor=actor)
+    return intake_event(event, actor=actor)
 
 
 def intake_event(event: dict, *, actor: str) -> tuple[dict, bool]:
@@ -197,6 +207,31 @@ def create_str(body: STRIn, request: Request):
     event["tenant_id"] = decision.get("tenant_id") or body.tenant_id
     rec, created = intake_event(event, actor=decision["sub"])
     return JSONResponse(status_code=201 if created else 200, content=rec)
+
+
+@app.post("/v1/ctr", status_code=201)
+def intake_ctr_endpoint(body: dict, request: Request):
+    """Direct CTR event intake (same aggregation pipeline as the bus
+    consumer): returns the statutory CTR report when the counterparty's
+    daily aggregate crosses the threshold. Auth + tenant scoping as for
+    manual STR intake."""
+    decision = authz.authorize_str_access(
+        request, write=True, tenant_id=str(body.get("tenant_id") or ""))
+    if isinstance(decision, JSONResponse):
+        return decision
+    body = dict(body)
+    body.pop("actor", None)
+    body["tenant_id"] = decision.get("tenant_id") or body.get("tenant_id") or ""
+    try:
+        report, created = ctr.intake_ctr(body, actor=decision["sub"])
+    except ValueError as e:
+        return authz.problem(422, "unprocessable", str(e))
+    if not report:
+        return JSONResponse(status_code=202,
+                            content={"status": "aggregated", "report": None})
+    return JSONResponse(status_code=201 if created else 200,
+                        content={"status": "reported", "report": report,
+                                 "created": created})
 
 
 @app.get("/v1/str/{str_id}")

@@ -120,6 +120,31 @@ class STRFiling(Base):
         }
 
 
+class CTREvent(Base):
+    """One consumed nrs.aml.ctr.v1 event (audit R4 S1b#2): the raw currency
+    transaction facts used to aggregate per counterparty/day into the
+    statutory CTR report."""
+    __tablename__ = "ctr_events"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "idempotency_key",
+                         name="uq_ctr_tenant_idem"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                    autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    idempotency_key: Mapped[str] = mapped_column(String(128), index=True)
+    counterparty_ref: Mapped[str] = mapped_column(String(128), index=True)
+    amount_kobo: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(8), default="NGN")
+    occurred_day: Mapped[str] = mapped_column(String(10), index=True)
+    occurred_at: Mapped[str] = mapped_column(String(40), default="")
+    account_ref: Mapped[str] = mapped_column(String(128), default="")
+    channel: Mapped[str] = mapped_column(String(32), default="")
+    raw: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 def database_url() -> str:
     url = os.environ.get("STR_DATABASE_URL") or os.environ.get("DATABASE_URL")
     if url:
