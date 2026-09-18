@@ -32,7 +32,31 @@ individually retryable with backoff:
 | PATCH | `/v1/invoices/{irn}` | update `payment_status` (PENDING\|PAID\|REJECTED) and/or `reference` only; any other field → **409**; emits `nrs.einvoice.payment_status.v1` with an audit-trail entry |
 | POST | `/v1/webhooks` | register a stakeholder webhook `{business_id, url, secret}` (fail-closed in prod: HTTPS + ≥16-byte secret) |
 | GET | `/v1/webhooks?business_id=` | registered endpoints (secrets redacted) + delivery history |
+| GET | `/v1/vat/summary` | VAT summary over stored invoices (`?tenant_id=&period=YYYY-MM`): output VAT by basket, invoice counts, rule-pack version |
+| GET/POST | `/v1/apikeys` | Merchant API keys (I5): list / create — see "Merchant API keys" below |
+| POST | `/v1/apikeys/{id}:rotate`, `/v1/apikeys/{id}:revoke` | Key rotation / revocation (audit-logged) |
 | GET | `/v1/invoices/{id}`, `POST /v1/invoices/{id}/preclear`, `GET /v1/invoices/{id}/qr`, `POST /v1/b2c/report`, `GET /v1/replay`, `POST /v1/replay/{seq}`, `GET /v1/workflows`, `GET /v1/apps`, `GET /v1/csid/public-key` | existing — unchanged |
+
+## Merchant API keys (I5) [REAL]
+
+`POST /v1/apikeys` (admin) issues a merchant key shown **once** in the
+create response; only the SHA-256 hash is persisted. Keys authenticate via
+`X-Api-Key` and are **path-scoped** (audit R4): a key may call only
+`/v1/invoices*` (its own tenant's), `/v1/b2c/*` and `/v1/vat/*`;
+`/v1/apikeys*` itself is hard-denied for key auth. Verification is
+read-mostly (write lock only for create/rotate/revoke); `last_used_at`
+persists at most once per minute per key. Both JWT and API-key paths run
+through the same OTel middleware. `POST /v1/apikeys/{id}:rotate` issues a
+fresh secret (old key revoked); `POST /v1/apikeys/{id}:revoke` disables
+immediately; both are audit-logged.
+
+**NRS replay tenant guard (audit R4):** `POST /v1/invoices/nrs`
+idempotency-key replay and the NRS get-by-IRN replay are tenant-scoped —
+replaying against another tenant's key/IRN returns 404, never the invoice.
+The NRS live rail is fail-closed: preclearance accepts only
+`cleared|rejected`, B2C reporting only `accepted|rejected` (unknown or
+missing statuses error, never silently treated as cleared), and 401s
+trigger a single-flight token refresh with one retry.
 
 ## NRS schema ⇄ canonical model [REAL]
 
