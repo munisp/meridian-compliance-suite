@@ -133,15 +133,15 @@ func parseList(lines []yamlLine, i, indent int) (any, int, error) {
 	var out []any
 	for i < len(lines) {
 		ln := lines[i]
-		if ln.indent < indent || (!strings.HasPrefix(ln.content, "- ") && ln.content != "-") {
+		if ln.indent != indent || (!strings.HasPrefix(ln.content, "- ") && ln.content != "-") {
 			break
 		}
-		if ln.indent > indent {
-			return nil, i, fmt.Errorf("unexpected indent in list at %q", ln.content)
+		rest := strings.TrimPrefix(ln.content, "- ")
+		if rest == ln.content {
+			rest = ""
 		}
-		item := strings.TrimSpace(strings.TrimPrefix(ln.content, "-"))
-		i++
-		if item == "" {
+		if rest == "" {
+			i++
 			if i < len(lines) && lines[i].indent > indent {
 				v, ni, err := parseBlock(lines, i, lines[i].indent)
 				if err != nil {
@@ -154,352 +154,423 @@ func parseList(lines []yamlLine, i, indent int) (any, int, error) {
 			}
 			continue
 		}
-		if key, val, ok := splitKV(item); ok && !strings.HasPrefix(item, "{") && !strings.HasPrefix(item, "[") {
-			// inline map start: treat rest as map entries at deeper indent
+		// inline scalar or start of a nested map on the same line ("- id: x")
+		if k, v, ok := splitKV(rest); ok && !strings.HasPrefix(v, "{") {
+			// nested map beginning with an inline pair
 			m := map[string]any{}
-			if val != "" {
-				v, err := parseScalar(val)
-				if err != nil {
-					return nil, i, err
-				}
-				m[key] = v
-			} else if i < len(lines) && lines[i].indent > indent {
-				v, ni, err := parseBlock(lines, i, lines[i].indent)
+			sv, err := parseScalar(v)
+			if err != nil {
+				return nil, i, err
+			}
+			m[k] = sv
+			i++
+			for i < len(lines) && lines[i].indent > indent {
+				sub, ni, err := parseMap(lines, i, lines[i].indent)
 				if err != nil {
 					return nil, ni, err
 				}
-				m[key] = v
+				for kk, vv := range sub.(map[string]any) {
+					m[kk] = vv
+				}
 				i = ni
-			} else {
-				m[key] = nil
-			}
-			// consume following deeper-indented map lines
-			for i < len(lines) && lines[i].indent > indent && !strings.HasPrefix(lines[i].content, "- ") {
-				sub := lines[i]
-				k2, v2, ok2 := splitKV(sub.content)
-				if !ok2 {
-					return nil, i, fmt.Errorf("bad map line %q", sub.content)
+				if i < len(lines) && lines[i].indent > indent {
+					continue
 				}
-				i++
-				if v2 != "" {
-					v, err := parseScalar(v2)
-					if err != nil {
-						return nil, i, err
-					}
-					m[k2] = v
-				} else if i < len(lines) && lines[i].indent > sub.indent {
-					v, ni, err := parseBlock(lines, i, lines[i].indent)
-					if err != nil {
-						return nil, ni, err
-					}
-					m[k2] = v
-					i = ni
-				} else {
-					m[k2] = nil
-				}
+				break
 			}
 			out = append(out, m)
 			continue
 		}
-		v, err := parseScalar(item)
+		v, err := parseScalar(rest)
 		if err != nil {
 			return nil, i, err
 		}
 		out = append(out, v)
+		i++
 	}
 	return out, i, nil
 }
 
-func splitKV(s string) (key, val string, ok bool) {
-	idx := strings.Index(s, ": ")
-	if idx < 0 {
-		if strings.HasSuffix(s, ":") {
-			return strings.TrimSpace(s[:len(s)-1]), "", true
+func splitKV(s string) (string, string, bool) {
+	inS, inD := false, false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\'':
+			if !inD {
+				inS = !inS
+			}
+		case '"':
+			if !inS {
+				inD = !inD
+			}
+		case ':':
+			if !inS && !inD && (i+1 == len(s) || s[i+1] == ' ') {
+				return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:]), true
+			}
 		}
-		return "", "", false
 	}
-	return strings.TrimSpace(s[:idx]), strings.TrimSpace(s[idx+2:]), true
+	return "", "", false
 }
 
 func parseScalar(s string) (any, error) {
 	s = strings.TrimSpace(s)
-	switch {
-	case s == "null" || s == "~":
+	if s == "" || s == "null" || s == "~" {
 		return nil, nil
-	case s == "true":
-		return true, nil
-	case s == "false":
-		return false, nil
-	case strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}"):
+	}
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
 		m := map[string]any{}
-		body := strings.TrimSpace(s[1 : len(s)-1])
-		if body == "" {
+		inner := strings.TrimSpace(s[1 : len(s)-1])
+		if inner == "" {
 			return m, nil
 		}
-		for _, part := range splitFlow(body) {
+		for _, part := range splitFlow(inner) {
 			k, v, ok := splitKV(part)
 			if !ok {
-				return nil, fmt.Errorf("bad flow map entry %q", part)
+				return nil, fmt.Errorf("bad flow pair %q", part)
 			}
-			vv, err := parseScalar(v)
+			sv, err := parseScalar(v)
 			if err != nil {
 				return nil, err
 			}
-			m[k] = vv
+			m[k] = sv
 		}
 		return m, nil
-	case strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]"):
+	}
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
 		var out []any
-		body := strings.TrimSpace(s[1 : len(s)-1])
-		if body == "" {
+		inner := strings.TrimSpace(s[1 : len(s)-1])
+		if inner == "" {
 			return out, nil
 		}
-		for _, part := range splitFlow(body) {
-			vv, err := parseScalar(strings.TrimSpace(part))
+		for _, part := range splitFlow(inner) {
+			v, err := parseScalar(part)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, vv)
+			out = append(out, v)
 		}
 		return out, nil
-	case strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") && len(s) >= 2:
+	}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
 		return s[1 : len(s)-1], nil
-	case strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'") && len(s) >= 2:
+	}
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
 		return strings.ReplaceAll(s[1:len(s)-1], "''", "'"), nil
 	}
-	if iv, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return iv, nil
+	if s == "true" {
+		return true, nil
 	}
-	if fv, err := strconv.ParseFloat(s, 64); err == nil {
-		return fv, nil
+	if s == "false" {
+		return false, nil
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i, nil
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f, nil
 	}
 	return s, nil
 }
 
-func splitFlow(body string) []string {
-	var parts []string
+func splitFlow(s string) []string {
+	var out []string
 	depth := 0
+	inS, inD := false, false
 	start := 0
-	for i := 0; i < len(body); i++ {
-		switch body[i] {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\'':
+			if !inD {
+				inS = !inS
+			}
+		case '"':
+			if !inS {
+				inD = !inD
+			}
 		case '{', '[':
-			depth++
+			if !inS && !inD {
+				depth++
+			}
 		case '}', ']':
-			depth--
+			if !inS && !inD {
+				depth--
+			}
 		case ',':
-			if depth == 0 {
-				parts = append(parts, strings.TrimSpace(body[start:i]))
+			if !inS && !inD && depth == 0 {
+				out = append(out, strings.TrimSpace(s[start:i]))
 				start = i + 1
 			}
 		}
 	}
-	parts = append(parts, strings.TrimSpace(body[start:]))
-	return parts
+	out = append(out, strings.TrimSpace(s[start:]))
+	return out
 }
 
-// ---------- rp-* pack model (SPEC §1.4) ----------
+// ---------- rp-* pack loading: registry-first with embedded fallback (SPEC §1.4) ----------
+
+type RulePack struct {
+	ID                    string
+	Version               string
+	EffectiveFrom         string
+	EffectiveTo           string
+	Status                string // draft|published|gazetted|archived
+	SubjectToRegazette    bool
+	Provenance            map[string]any
+	Signed                map[string]any
+	Rules                 []Rule
+}
 
 type Rule struct {
-	ID   string         `json:"id"`
-	When map[string]any `json:"when"`
-	Then map[string]any `json:"then"`
+	ID   string
+	When map[string]any
+	Then map[string]any
 }
 
-type Pack struct {
-	ID                 string         `json:"id"`
-	Version            string         `json:"version"`
-	EffectiveFrom      string         `json:"effective_from"`
-	Status             string         `json:"status"`
-	SubjectToRegazette bool           `json:"subject_to_regazette"`
-	Provenance         map[string]any `json:"provenance"`
-	Rules              []Rule         `json:"rules"`
-	Source             string         `json:"source"` // registry|embedded
-}
-
-func packFromYAML(id, doc, source string) (*Pack, error) {
-	v, err := ParseYAML(doc)
+func packFromYAML(id string, raw []byte) (*RulePack, error) {
+	doc, err := ParseYAML(string(raw))
 	if err != nil {
 		return nil, err
 	}
-	m, ok := v.(map[string]any)
+	m, ok := doc.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("pack %s: root not a map", id)
+		return nil, fmt.Errorf("pack root not a map")
 	}
-	p := &Pack{Source: source, Provenance: map[string]any{}}
-	p.ID = strOf(m["id"])
+	p := &RulePack{ID: id}
 	p.Version = strOf(m["version"])
 	p.EffectiveFrom = strOf(m["effective_from"])
+	p.EffectiveTo = strOf(m["effective_to"])
 	p.Status = strOf(m["status"])
 	p.SubjectToRegazette, _ = m["subject_to_regazette"].(bool)
-	if prov, ok := m["provenance"].(map[string]any); ok {
-		p.Provenance = prov
-	}
-	if rules, ok := m["rules"].([]any); ok {
-		for _, rv := range rules {
-			rm, ok := rv.(map[string]any)
-			if !ok {
-				continue
-			}
-			r := Rule{ID: strOf(rm["id"])}
-			if w, ok := rm["when"].(map[string]any); ok {
-				r.When = w
-			}
-			if t, ok := rm["then"].(map[string]any); ok {
-				r.Then = t
-			}
-			p.Rules = append(p.Rules, r)
+	p.Provenance, _ = m["provenance"].(map[string]any)
+	p.Signed, _ = m["signed"].(map[string]any)
+	rules, _ := m["rules"].([]any)
+	for _, rv := range rules {
+		rm, ok := rv.(map[string]any)
+		if !ok {
+			continue
 		}
+		r := Rule{ID: strOf(rm["id"])}
+		r.When, _ = rm["when"].(map[string]any)
+		r.Then, _ = rm["then"].(map[string]any)
+		p.Rules = append(p.Rules, r)
+	}
+	if p.Version == "" {
+		return nil, fmt.Errorf("pack %s missing version", id)
 	}
 	return p, nil
 }
 
 func strOf(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case int64:
-		return strconv.FormatInt(t, 10)
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(t)
-	}
-	return ""
+	s, _ := v.(string)
+	return s
 }
 
-// ---------- PackSet: rp-vat-* with registry API + embedded fallback ----------
-
+// PackSet holds the active packs for a service.
 type PackSet struct {
-	cfg   Config
 	mu    sync.RWMutex
-	packs map[string]*Pack
+	packs map[string]*RulePack
+	cfg   Config
 }
 
 func NewPackSet(cfg Config) *PackSet {
-	return &PackSet{cfg: cfg, packs: map[string]*Pack{}}
+	return &PackSet{packs: map[string]*RulePack{}, cfg: cfg}
 }
 
-var vatPackIDs = []string{
-	"rp-vat-rates", "rp-vat-exempt-basket", "rp-vat-zerorated-basket",
-	"rp-vat-attribution-mode", "rp-platform-collectors",
-}
-
+// LoadPacks resolves every pack: registry (RULE_PACK_REGISTRY_URL) first,
+// embedded fallback. Fail-closed in prod: no registry, no pack.
 func (ps *PackSet) LoadPacks() {
-	for _, id := range vatPackIDs {
-		p, err := ps.fetchFromRegistry(id)
-		if err != nil {
-			p, err = packFromYAML(id, embeddedPacks[id], "embedded")
-			if err != nil {
-				logm("error", fmt.Sprintf("embedded pack %s failed: %v", id, err))
+	for _, id := range packOrder {
+		if p := ps.fetchFromRegistry(id); p != nil {
+			ps.mu.Lock()
+			ps.packs[id] = p
+			ps.mu.Unlock()
+			logm("info", "pack "+id+" loaded from registry v"+p.Version)
+			continue
+		}
+		if raw, ok := embeddedPacks[id]; ok {
+			p, err := packFromYAML(id, raw)
+			if err == nil {
+				ps.mu.Lock()
+				ps.packs[id] = p
+				ps.mu.Unlock()
+				logm("info", "pack "+id+" loaded from embedded fallback v"+p.Version)
 				continue
 			}
+			logm("error", "embedded pack "+id+" failed: "+err.Error())
 		}
-		ps.mu.Lock()
-		ps.packs[id] = p
-		ps.mu.Unlock()
-		logm("info", fmt.Sprintf("loaded pack %s@%s (%s)", p.ID, p.Version, p.Source))
+		if ps.cfg.Profile == "prod" {
+			logm("error", "pack "+id+" unavailable in prod (fail-closed)")
+		}
 	}
 }
 
-func (ps *PackSet) fetchFromRegistry(id string) (*Pack, error) {
-	if ps.cfg.RegistryURL == "" {
-		return nil, fmt.Errorf("no registry configured")
+func (ps *PackSet) fetchFromRegistry(id string) *RulePack {
+	base := ps.cfg.RulePackRegistryURL
+	if base == "" {
+		return nil
 	}
-	resp, err := registryHTTPClient.Get(ps.cfg.RegistryURL + "/v1/packs/" + id + "/latest")
+	resp, err := registryHTTPClient.Get(strings.TrimRight(base, "/") + "/packs/" + id + "/active")
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("registry %d", resp.StatusCode)
+		return nil
+	}
+	var payload struct {
+		ID      string `json:"id"`
+		Content string `json:"content"` // raw YAML (registry is the source of truth)
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	// registry may wrap the yaml in a JSON envelope {yaml: "..."} or serve raw
-	if p, err := packFromYAML(id, string(body), "registry"); err == nil && p.ID != "" {
-		return p, nil
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Content == "" {
+		return nil
 	}
-	var wrapper struct {
-		YAML    string `json:"yaml"`
-		Raw     string `json:"raw"`
-		Content string `json:"content"`
+	p, err := packFromYAML(id, []byte(payload.Content))
+	if err != nil {
+		return nil
 	}
-	if err := jsonUnmarshal(body, &wrapper); err == nil {
-		doc := wrapper.YAML
-		if doc == "" {
-			doc = wrapper.Raw
-		}
-		if doc == "" {
-			doc = wrapper.Content
-		}
-		if doc != "" {
-			return packFromYAML(id, doc, "registry")
-		}
-	}
-	return nil, fmt.Errorf("unparseable registry response for %s", id)
+	return p
 }
 
-func (ps *PackSet) Get(id string) *Pack {
+// Active returns the active pack for id (nil if not loaded).
+func (ps *PackSet) Get(id string) *RulePack {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	return ps.packs[id]
 }
 
-func (ps *PackSet) Loaded() []Pack {
+func (ps *PackSet) Loaded() []string {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	out := make([]Pack, 0, len(ps.packs))
-	for _, p := range ps.packs {
-		out = append(out, *p)
+	out := []string{}
+	for id := range ps.packs {
+		out = append(out, id)
 	}
 	return out
 }
 
-// VersionTag returns "rp-a@1.0.0,rp-b@1.0.0" for envelopes.
-func (ps *PackSet) VersionTag() string {
+// VersionString renders the loaded packs for event metadata.
+func (ps *PackSet) VersionString() string {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	parts := []string{}
-	for _, id := range vatPackIDs {
+	for _, id := range packOrder {
 		if p := ps.packs[id]; p != nil {
-			parts = append(parts, p.ID+"@"+p.Version)
+			parts = append(parts, id+"@"+p.Version)
 		}
 	}
 	return strings.Join(parts, ",")
 }
 
-// BasketFor classifies a line category into standard_75|zero_rated|exempt.
-func (ps *PackSet) BasketFor(category string) string {
-	cat := strings.ToLower(strings.TrimSpace(category))
-	if cat == "" {
-		return "standard_75"
+// evaluateMatches collects then-maps of all rules whose when-clauses match.
+func evaluateMatches(p *RulePack, ctx map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, r := range p.Rules {
+		if whenMatches(r.When, ctx) {
+			out = append(out, r.Then)
+		}
 	}
-	if p := ps.Get("rp-vat-exempt-basket"); p != nil {
-		for _, r := range p.Rules {
-			if listMatch(r.Then["categories"], cat) {
-				return "exempt"
+	return out
+}
+
+func whenMatches(when map[string]any, ctx map[string]any) bool {
+	for k, want := range when {
+		base, op := k, "eq"
+		for _, suffix := range []string{"__gt", "__gte", "__lt", "__lte", "__ne", "__in", "__prefix"} {
+			if strings.HasSuffix(k, suffix) {
+				base = strings.TrimSuffix(k, suffix)
+				op = strings.TrimPrefix(suffix, "__")
+				break
+			}
+		}
+		got := ctx[base]
+		switch op {
+		case "eq":
+			if !scalarEq(got, want) {
+				return false
+			}
+		case "ne":
+			if scalarEq(got, want) {
+				return false
+			}
+		case "gt", "gte", "lt", "lte":
+			if !numCmp(got, want, op) {
+				return false
+			}
+		case "in":
+			if !listMatch(want, strOf(got)) {
+				return false
+			}
+		case "prefix":
+			if !strings.HasPrefix(strOf(got), strOf(want)) {
+				return false
 			}
 		}
 	}
-	if p := ps.Get("rp-vat-zerorated-basket"); p != nil {
-		for _, r := range p.Rules {
-			if listMatch(r.Then["categories"], cat) {
-				return "zero_rated"
-			}
+	return true
+}
+
+func scalarEq(a, b any) bool {
+	if ai, ok := a.(int64); ok {
+		switch bv := b.(type) {
+		case int64:
+			return ai == bv
+		case float64:
+			return float64(ai) == bv
 		}
 	}
-	return "standard_75"
+	if af, ok := a.(float64); ok {
+		switch bv := b.(type) {
+		case int64:
+			return af == float64(bv)
+		case float64:
+			return af == bv
+		}
+	}
+	return strOf(a) == strOf(b) || a == b
+}
+
+func numCmp(a, b any, op string) bool {
+	var af, bf float64
+	switch v := a.(type) {
+	case int64:
+		af = float64(v)
+	case float64:
+		af = v
+	default:
+		return false
+	}
+	switch v := b.(type) {
+	case int64:
+		bf = float64(v)
+	case float64:
+		bf = v
+	default:
+		return false
+	}
+	switch op {
+	case "gt":
+		return af > bf
+	case "gte":
+		return af >= bf
+	case "lt":
+		return af < bf
+	case "lte":
+		return af <= bf
+	}
+	return false
 }
 
 func listMatch(v any, cat string) bool {
-	switch t := v.(type) {
+	switch l := v.(type) {
 	case []any:
-		for _, e := range t {
+		for _, e := range l {
 			if strings.ToLower(strOf(e)) == cat {
 				return true
 			}
 		}
 	case string:
-		for _, e := range strings.Split(t, ",") {
+		for _, e := range strings.Split(l, ",") {
 			if strings.ToLower(strings.TrimSpace(e)) == cat {
 				return true
 			}
@@ -508,58 +579,59 @@ func listMatch(v any, cat string) bool {
 	return false
 }
 
-// StandardRateBPS returns the standard VAT rate in basis points (7.5% = 750).
-func (ps *PackSet) StandardRateBPS() int64 {
-	if p := ps.Get("rp-vat-rates"); p != nil {
+// ---------- rp-vat-nigeria helpers ----------
+
+// BasketForSKU maps a SKU category hint to a VAT basket using rp-vat-nigeria rules.
+func (ps *PackSet) BasketForSKU(category string) string {
+	if p := ps.Get("rp-vat-nigeria"); p != nil {
+		cat := strings.ToLower(category)
 		for _, r := range p.Rules {
-			if r.ID == "vat.rate.standard" {
-				if bps, ok := r.Then["rate_bps"].(int64); ok {
-					return bps
+			if listMatch(r.Then["categories"], cat) {
+				return strOf(r.Then["basket"])
+			}
+		}
+	}
+	switch strings.ToLower(category) {
+	case "food", "staples", "unprocessed food":
+		return "food_staples"
+	case "medicine", "pharma", "medical":
+		return "medicines"
+	case "book", "books", "education":
+		return "education"
+	case "export":
+		return "exports"
+	default:
+		return "general"
+	}
+}
+
+// VatRateBps resolves the VAT rate for a basket from rp-vat-nigeria (default 750).
+func (ps *PackSet) VatRateBps(basket string) int64 {
+	if p := ps.Get("rp-vat-nigeria"); p != nil {
+		for _, r := range p.Rules {
+			if strOf(r.Then["basket"]) == basket {
+				if rate, ok := r.Then["rate_bps"].(int64); ok {
+					return rate
 				}
 			}
 		}
 	}
-	return 750
-}
-
-// AttributionConfig resolves the attribution mode + shares from rp-vat-attribution-mode.
-type AttributionConfig struct {
-	Mode            string `json:"mode"`
-	FederalShareBPS int64  `json:"federal_share_bps"`
-	StateShareBPS   int64  `json:"state_share_bps"`
-	LGAShareBPS     int64  `json:"lga_share_bps"`
-}
-
-func (ps *PackSet) AttributionConfig(fallback string) AttributionConfig {
-	cfg := AttributionConfig{Mode: fallback, FederalShareBPS: 1000, StateShareBPS: 5500, LGAShareBPS: 3500}
-	if p := ps.Get("rp-vat-attribution-mode"); p != nil {
-		for _, r := range p.Rules {
-			if r.ID == "vat.attribution.mode" {
-				if m := strOf(r.Then["mode"]); m != "" {
-					cfg.Mode = m
-				}
-			}
-			if r.ID == "vat.attribution.shares" {
-				if v, ok := r.Then["federal_share_bps"].(int64); ok {
-					cfg.FederalShareBPS = v
-				}
-				if v, ok := r.Then["state_share_bps"].(int64); ok {
-					cfg.StateShareBPS = v
-				}
-				if v, ok := r.Then["lga_share_bps"].(int64); ok {
-					cfg.LGAShareBPS = v
-				}
-			}
-		}
+	switch basket {
+	case "food_staples", "medicines", "education", "exports":
+		return 0
+	default:
+		return 750
 	}
-	return cfg
 }
 
-// IsPlatformCollector reports whether the merchant is a designated platform collector.
+// IsPlatformCollector reports whether the merchant is a designated platform
+// collector. listMatch lowercases the pack entries, so the TIN prefix is
+// lowered here too (audit R4 S1a#8: the case mismatch meant this predicate
+// could never fire — one reason the regime was dead code).
 func (ps *PackSet) IsPlatformCollector(tin string) bool {
 	if p := ps.Get("rp-platform-collectors"); p != nil {
 		for _, r := range p.Rules {
-			if listMatch(r.Then["tin_prefixes"], tinPrefix(tin)) {
+			if listMatch(r.Then["tin_prefixes"], strings.ToLower(tinPrefix(tin))) {
 				return true
 			}
 		}

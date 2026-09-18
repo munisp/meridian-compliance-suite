@@ -45,18 +45,23 @@ type Receipt struct {
 	Currency        string        `json:"currency"` // NGN
 	IdempotencyKey  string        `json:"idempotency_key,omitempty"`
 	// computed
-	Baskets         map[string]int64  `json:"baskets"` // basket -> net kobo
-	VATKobo         int64             `json:"vat_kobo"`
-	TotalKobo       int64             `json:"total_kobo"`
-	State           string            `json:"state"`
-	LGA             string            `json:"lga"`
-	Attribution     AttributionResult `json:"attribution"`
-	Status          string            `json:"status"` // ingested|spooled|settled
+	Baskets map[string]int64 `json:"baskets"` // basket -> net kobo
+	// Designated platform-collectors regime (rp-platform-collectors): when the
+	// merchant is a designated platform, VAT on the sale is collected and
+	// remitted by the PLATFORM (NTA 2025 s.15(3)/s.146), not the seller.
+	PlatformCollected bool   `json:"platform_collected,omitempty"`
+	CollectorTIN      string `json:"collector_tin,omitempty"`
+	VATKobo           int64  `json:"vat_kobo"`
+	TotalKobo         int64  `json:"total_kobo"`
+	State             string `json:"state"`
+	LGA               string `json:"lga"`
+	Attribution       AttributionResult `json:"attribution"`
+	Status            string            `json:"status"` // ingested|spooled|settled
 	// SettledIn records the (tenant, period) settlement marker this receipt
 	// was remitted under (B3 #2): receipts ingested after their period
 	// settled stay unsettled until a supplemental settlement remits them.
-	SettledIn       string            `json:"settled_in,omitempty"`
-	RulePackVersion string            `json:"rule_pack_version"`
+	SettledIn       string `json:"settled_in,omitempty"`
+	RulePackVersion string `json:"rule_pack_version"`
 	// Citations: LCE SPEC §5 statute citations per computed VAT amount
 	// (additive response-layer field; empty when no VAT-bearing basket).
 	Citations []rulepack.Citation `json:"citations,omitempty"`
@@ -127,7 +132,6 @@ func ULID() string {
 			} else {
 				v <<= 1
 			}
-		}
 		out[i] = crockford[v]
 	}
 	return string(out[:])
@@ -161,8 +165,8 @@ func writeProblem(w http.ResponseWriter, code int, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(Problem{
-		Type:  fmt.Sprintf("https://meridian.ng/problems/%d", code),
-		Title: title, Status: code, Detail: detail,
+		Type:   fmt.Sprintf("https://meridian.ng/problems/%d", code),
+		Title:  title, Status: code, Detail: detail,
 	})
 }
 
