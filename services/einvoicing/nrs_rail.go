@@ -163,7 +163,11 @@ type LiveRailClient struct {
 
 // NewLiveRailClient builds the live-rail adapter from a validated config.
 func NewLiveRailClient(cfg LiveRailConfig) *LiveRailClient {
-	return &LiveRailClient{cfg: cfg, endpoints: NRSEndpointCatalog()}
+	return &LiveRailClient{cfg: cfg, endpoints: NRSEndpointCatalog(),
+		// PERF: construct the HTTP client once — building a fresh
+		// http.Client (+ otelx transport wrapper) per call allocated a new
+		// client/roundTripper on every request.
+		client: &http.Client{Timeout: 15 * time.Second, Transport: otelx.Client(nil)}}
 }
 
 func (c *LiveRailClient) Name() string { return "mbs-live-rail" }

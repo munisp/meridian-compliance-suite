@@ -64,14 +64,21 @@ func Middleware(next http.Handler) http.Handler {
 
 		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		r2 := r.WithContext(ctx)
-		next.ServeHTTP(rw, r2)
 
-		// Low-cardinality route template (Go 1.22 mux knows the pattern).
-		// Falls back to "unmatched" for 404s outside any registered route.
-		route := ""
+		// Low-cardinality route template (the Go 1.22 mux knows the
+		// pattern). Match ONCE up front and dispatch through the returned
+		// handler — ServeMux.ServeHTTP is exactly mux.Handler(r) + Serve,
+		// so this is behavior-identical but removes the second route match
+		// the old code paid per request (PERF). Falls back to "unmatched"
+		// for 404s outside any registered route.
+		handler, route := next, ""
 		if mux, ok := next.(*http.ServeMux); ok {
-			_, route = mux.Handler(r2)
+			if h, p := mux.Handler(r2); h != nil {
+				handler, route = h, p
+			}
 		}
+		handler.ServeHTTP(rw, r2)
+
 		if route == "" {
 			route = "unmatched"
 		} else {

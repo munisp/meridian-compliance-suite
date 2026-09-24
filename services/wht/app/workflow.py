@@ -114,16 +114,44 @@ def wf_wht_remit_schedule(period: str = "", tenant_id: str = "") -> WorkflowRun:
         back; a retry re-runs the unit and converges to exactly one credit
         per deduction."""
         posted = skipped = 0
+        # PERF: bulk-load instead of 3 round-trips per deduction (sess.get +
+        # source-select + sess.get = O(3N) queries). Two chunked IN queries
+        # fetch every existing credit (by deterministic id and by source) and
+        # one fetches the deduction rows; the dedup/mark loop below is pure
+        # in-memory. Semantics unchanged: same dedup rule, same single
+        # atomic commit.
+        from sqlalchemy import select as _select
+        ded_ids = [d["id"] for d in state["deductions"]]
+        credit_ids = [f"cr-{state['batch_id']}-{did}" for did in ded_ids]
+
+        def _chunks(xs, n=500):  # stay under SQLite/Postgres bind limits
+            for i in range(0, len(xs), n):
+                yield xs[i:i + n]
+
         with db.session() as sess:
+            existing_ids: set[str] = set()
+            existing_sources: set[str] = set()
+            for chunk in _chunks(ded_ids):
+                for cid, source in sess.execute(
+                        _select(db.Credit.id, db.Credit.source).where(
+                            db.Credit.source.in_(chunk))):
+                    existing_sources.add(source)
+            for chunk in _chunks(credit_ids):
+                for (cid,) in sess.execute(
+                        _select(db.Credit.id).where(db.Credit.id.in_(chunk))):
+                    existing_ids.add(cid)
+            rows_by_id = {}
+            for chunk in _chunks(ded_ids):
+                for row in sess.execute(
+                        _select(db.Deduction).where(
+                            db.Deduction.id.in_(chunk))).scalars():
+                    rows_by_id[row.id] = row
             for d in state["deductions"]:
                 cid = f"cr-{state['batch_id']}-{d['id']}"
                 # dedup: deterministic credit id per run AND a source-index
                 # check (a credit already posted for this deduction by ANY
                 # earlier run/crash-orphaned batch is never reposted)
-                from sqlalchemy import select as _select
-                existing = sess.get(db.Credit, cid) or sess.execute(
-                    _select(db.Credit).where(db.Credit.source == d["id"])).scalars().first()
-                if existing is None:
+                if cid not in existing_ids and d["id"] not in existing_sources:
                     sess.add(db.Credit(
                         id=cid,
                         vendor_tin=d["vendor_tin"], credit_kobo=d["wht_kobo"],
@@ -133,7 +161,7 @@ def wf_wht_remit_schedule(period: str = "", tenant_id: str = "") -> WorkflowRun:
                     posted += 1
                 else:
                     skipped += 1  # replay: already posted by an earlier attempt
-                row = sess.get(db.Deduction, d["id"])
+                row = rows_by_id.get(d["id"])
                 if row is not None:
                     row.remitted = True
                     row.remit_batch = state["batch_id"]

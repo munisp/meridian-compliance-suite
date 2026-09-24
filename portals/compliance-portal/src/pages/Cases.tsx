@@ -20,9 +20,13 @@ export default function Cases() {
   const open = async (m: any) => {
     setSelected(m); setEvidence(null)
     try {
-      const d = await api('cases').get(`/v1/matters/${m.id}/documents`)
+      // PERF: fetch documents and deadlines in parallel (was a sequential
+      // 2-request waterfall per matter open).
+      const [d, dl] = await Promise.all([
+        api('cases').get(`/v1/matters/${m.id}/documents`),
+        api('cases').get(`/v1/deadlines?matter_id=${m.id}`),
+      ])
       setDocs(d.data.documents || [])
-      const dl = await api('cases').get(`/v1/deadlines?matter_id=${m.id}`)
       setDeadlines(dl.data.deadlines || [])
     } catch (e) { setError(e) }
   }
