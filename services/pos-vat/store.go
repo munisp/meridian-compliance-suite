@@ -32,15 +32,29 @@ type Store struct {
 	// the high-water mark or the max linger is reached — same pattern as
 	// MarkReceiptsSettled (one Sync per batch).
 	pendingSync int
-	lastSync    time.Time
+	// syncLinger bounds how long a written receipt may sit un-fsynced; a
+	// background flusher ticks on this interval. Field (not const) so
+	// tests can shorten it.
+	syncLinger time.Duration
+	// Background time-based flusher lifecycle (see flusher()).
+	stopFlush chan struct{}
+	flushDone chan struct{}
+	closeOnce sync.Once
+	// syncCount totals completed log fsyncs (durability probe for tests).
+	syncCount int
 }
 
 const (
-	// Group-commit policy for PutReceipt: at most 63 receipts or 25 ms of
-	// writes are at risk on a power-loss crash between flushes (process
-	// crash is unaffected — the writes are already in the page cache).
+	// Group-commit policy for PutReceipt: at most 63 receipts (high-water
+	// 64) or 25 ms of writes are at risk on a power-loss crash between
+	// flushes (process crash is unaffected — the writes are already in the
+	// page cache). The 25 ms bound is enforced by a background flusher
+	// goroutine (not by subsequent writes), and Close performs a final
+	// flush, so an acknowledged receipt is never left un-fsynced beyond
+	// one linger interval.
 	syncHighWater = 64
-	syncMaxLinger = 25 * time.Millisecond
+	// defaultSyncLinger is the production linger bound (≤25 ms).
+	defaultSyncLinger = 25 * time.Millisecond
 )
 
 type ReconRecord struct {
@@ -63,14 +77,81 @@ type ReconRecord struct {
 }
 
 func NewStore(dir string) *Store {
-	st := &Store{receipts: map[string]*Receipt{}, byTenant: map[string][]string{}, dir: dir}
+	return newStoreWithLinger(dir, defaultSyncLinger)
+}
+
+func newStoreWithLinger(dir string, linger time.Duration) *Store {
+	st := &Store{
+		receipts:   map[string]*Receipt{},
+		byTenant:   map[string][]string{},
+		dir:        dir,
+		syncLinger: linger,
+		stopFlush:  make(chan struct{}),
+		flushDone:  make(chan struct{}),
+	}
 	os.MkdirAll(filepath.Join(dir, "spool"), 0o755)
 	st.replay()
 	f, err := os.OpenFile(filepath.Join(dir, "receipts.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err == nil {
 		st.logFile = f
 	}
+	go st.flusher()
 	return st
+}
+
+// flusher enforces the time-based half of the group-commit policy: at
+// most syncLinger may pass with pending writes before they are fsynced,
+// independent of write traffic. flushLocked shares st.mu with the
+// high-water path in PutReceipt, so a tick can never double-fsync or
+// interleave with a write.
+func (st *Store) flusher() {
+	defer close(st.flushDone)
+	t := time.NewTicker(st.syncLinger)
+	defer t.Stop()
+	for {
+		select {
+		case <-st.stopFlush:
+			return
+		case <-t.C:
+			st.mu.Lock()
+			st.flushLocked()
+			st.mu.Unlock()
+		}
+	}
+}
+
+// flushLocked fsyncs the log if writes are pending. Caller holds st.mu.
+func (st *Store) flushLocked() error {
+	if st.logFile == nil || st.pendingSync == 0 {
+		return nil
+	}
+	if err := st.logFile.Sync(); err != nil {
+		return err
+	}
+	st.pendingSync = 0
+	st.syncCount++
+	return nil
+}
+
+// Close stops the background flusher, performs a final flush of any
+// pending receipts, and closes the log. Safe to call more than once.
+func (st *Store) Close() error {
+	var err error
+	st.closeOnce.Do(func() {
+		close(st.stopFlush)
+		<-st.flushDone
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if ferr := st.flushLocked(); ferr != nil {
+			err = ferr
+			return
+		}
+		if st.logFile != nil {
+			err = st.logFile.Close()
+			st.logFile = nil
+		}
+	})
+	return err
 }
 
 func (st *Store) replay() {
@@ -103,12 +184,10 @@ func (st *Store) PutReceipt(r *Receipt) error {
 			return err
 		}
 		st.pendingSync++
-		if st.pendingSync >= syncHighWater || time.Since(st.lastSync) >= syncMaxLinger {
-			if err := st.logFile.Sync(); err != nil {
+		if st.pendingSync >= syncHighWater {
+			if err := st.flushLocked(); err != nil {
 				return err
 			}
-			st.pendingSync = 0
-			st.lastSync = time.Now()
 		}
 	}
 	st.receipts[r.ID] = r
