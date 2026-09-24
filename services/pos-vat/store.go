@@ -27,7 +27,21 @@ type Store struct {
 	recon    []*ReconRecord
 	dir      string
 	logFile  *os.File
+	// group-commit state (PERF: a Sync per receipt serialized ingest to
+	// ~1/fsync-latency). Writes accumulate and flush together when either
+	// the high-water mark or the max linger is reached — same pattern as
+	// MarkReceiptsSettled (one Sync per batch).
+	pendingSync int
+	lastSync    time.Time
 }
+
+const (
+	// Group-commit policy for PutReceipt: at most 63 receipts or 25 ms of
+	// writes are at risk on a power-loss crash between flushes (process
+	// crash is unaffected — the writes are already in the page cache).
+	syncHighWater = 64
+	syncMaxLinger = 25 * time.Millisecond
+)
 
 type ReconRecord struct {
 	ID          string `json:"id"`
@@ -88,7 +102,14 @@ func (st *Store) PutReceipt(r *Receipt) error {
 		if _, err := st.logFile.Write(append(b, '\n')); err != nil {
 			return err
 		}
-		st.logFile.Sync()
+		st.pendingSync++
+		if st.pendingSync >= syncHighWater || time.Since(st.lastSync) >= syncMaxLinger {
+			if err := st.logFile.Sync(); err != nil {
+				return err
+			}
+			st.pendingSync = 0
+			st.lastSync = time.Now()
+		}
 	}
 	st.receipts[r.ID] = r
 	st.byTenant[r.TenantID] = append(st.byTenant[r.TenantID], r.ID)
@@ -132,10 +153,25 @@ func (st *Store) ListReceipts(tenant, state string, limit int) []*Receipt {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	out := []*Receipt{}
-	for _, r := range st.receipts {
-		if tenant != "" && r.TenantID != tenant {
-			continue
+	// PERF: use the byTenant index when a tenant filter is given instead of
+	// scanning every receipt in the store.
+	if tenant != "" {
+		for _, id := range st.byTenant[tenant] {
+			r, ok := st.receipts[id]
+			if !ok {
+				continue
+			}
+			if state != "" && !strings.EqualFold(r.State, state) {
+				continue
+			}
+			out = append(out, r)
+			if limit > 0 && len(out) >= limit {
+				break
+			}
 		}
+		return out
+	}
+	for _, r := range st.receipts {
 		if state != "" && !strings.EqualFold(r.State, state) {
 			continue
 		}
