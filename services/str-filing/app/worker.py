@@ -79,12 +79,14 @@ class FilingWorker:
                           rec.id, old, new_status)
 
     def refresh_dlq_depth(self):
+        from sqlalchemy import func
         with self.sessions() as s:
-            rows = (s.query(db.STRFiling.tenant_id)
-                    .filter(db.STRFiling.status == db.STATUS_DLQ).all())
-            counts: dict[str, int] = {}
-            for (tenant,) in rows:
-                counts[tenant] = counts.get(tenant, 0) + 1
+            # PERF: count in the database (GROUP BY) instead of pulling
+            # every DLQ row and counting in Python on every sweep.
+            rows = (s.query(db.STRFiling.tenant_id, func.count())
+                    .filter(db.STRFiling.status == db.STATUS_DLQ)
+                    .group_by(db.STRFiling.tenant_id).all())
+            counts: dict[str, int] = {tenant: int(n) for tenant, n in rows}
             for tenant, n in counts.items():
                 self.metrics.dlq_depth.labels(tenant_id=tenant).set(n)
             return counts
