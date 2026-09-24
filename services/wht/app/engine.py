@@ -172,14 +172,27 @@ class TINCheck:
     detail: str = ""
 
 
+# Shared httpx client for tin-graph calls (PERF: each httpx.post used to
+# build a throwaway client, paying TCP connect + TLS per call with no
+# keepalive). Lazy so tests that never reach tin-graph don't allocate one.
+_TIN_CLIENT: httpx.Client | None = None
+
+
+def _tin_client() -> httpx.Client:
+    global _TIN_CLIENT
+    if _TIN_CLIENT is None:
+        _TIN_CLIENT = httpx.Client(timeout=3.0)
+    return _TIN_CLIENT
+
+
 def validate_tin(tin: str) -> TINCheck:
     """Vendor-master TIN validation via core tin-graph; local fallback."""
     if not tin:
         return TINCheck(tin, False, "local-validator", "empty TIN")
     if TIN_GRAPH_URL:
         try:
-            resp = httpx.post(f"{TIN_GRAPH_URL}/v1/verify/tin", timeout=3.0,
-                              json={"tin": tin})
+            resp = _tin_client().post(f"{TIN_GRAPH_URL}/v1/verify/tin",
+                                      json={"tin": tin})
             if resp.status_code == 200:
                 body = resp.json()
                 return TINCheck(tin, bool(body.get("valid")), "tin-graph-api",
@@ -303,6 +316,13 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
             f"unknown payment_type {req.get('payment_type')!r} "
             f"(canonical: {sorted(KNOWN_PAYMENT_TYPES)})")
     as_of = ctx.get("date")  # transaction date -> rule effective-window dispatch
+    # PERF: validate the supplier TIN ONCE per evaluation and reuse the
+    # TINCheck for both the carve-out gate and the response identity block
+    # (previously two validate_tin calls = two synchronous tin-graph HTTP
+    # round-trips, 2x the 3 s timeout tail on an outage).
+    tin = ctx.get("supplier_tin", "")
+    tin_check = (validate_tin(tin) if tin else
+                 TINCheck("", False, "local-validator", "no TIN supplied"))
     via = "embedded-pack"
     if pack is None and registry is None and os.environ.get("RULES_ENGINE_URL"):
         # Deployment path: core rules-engine (Go) evaluates remotely.
@@ -311,8 +331,7 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
         matched = [t["rule_id"] for t in result["trace"] if t.get("matched")]
     else:
         pack = pack or (registry or _registry).load("rp-wht-2024")
-        tin0 = ctx.get("supplier_tin", "")
-        tin0_valid = validate_tin(tin0).valid if tin0 else False
+        tin0_valid = tin_check.valid
         rules = pack.rules
         if not tin0_valid and any(r.get("id") == "wht.small-co.carveout"
                                   for r in rules):
@@ -331,9 +350,6 @@ def evaluate_wht(req: dict, pack: Pack | None = None,
         matched = result["matched"]
     dec = result["decision"]
 
-    tin = ctx.get("supplier_tin", "")
-    tin_check = validate_tin(tin) if tin else TINCheck("", False, "local-validator",
-                                                       "no TIN supplied")
     identity_ok = bool(tin or (ctx["beneficiary"] == "individual" and ctx.get("supplier_nin")))
 
     # Decision assembly from the merged pack decision + matched rule ids.
